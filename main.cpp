@@ -6,6 +6,9 @@
 #include <cstring>
 #include <stdio.h>
 #include <cstdlib>
+#include <stdio.h>
+#include <getopt.h>
+#include "gru_sequential.h"
 
 using namespace std;
 
@@ -25,7 +28,7 @@ float toBW(int bytes, float sec) {
 void usage(const char* progname) {
     printf("Usage: %s [options]\n", progname);
     printf("Program Options:\n");
-    printf("  -n  --arraysize <INT>  Number of elements in arrays\n");
+    printf("  -g  --gpu <BOOL>  whether to use GPU\n");
     printf("  -?  --help             This message\n");
 }
 
@@ -45,17 +48,29 @@ void init(float *weight, size_t size) {
     }
 }
 
-void mat_multiplication_sequential(float* a, float* b, float* c, int c_width, int c_height, int a_width) {
-    for (int i = 0; i < c_height; ++i) {
-        for (int j = 0; j < c_width; ++j) {
-            for (int k = 0; k < a_width; ++k) {
-                c[i * c_width + j] += a[i * a_width + k] * b[k * c_width + j];
-            }
+int main(int argc, char** argv) {
+    // parse commandline options ////////////////////////////////////////////
+    int opt;
+    static struct option long_options[] = {
+        {"gpu",  1, 0, 'g'},
+        {"help", 0, 0, '?'},
+        {0 ,0, 0, 0}
+    };
+
+    bool use_gpu = false;
+
+    while ((opt = getopt_long(argc, argv, "g:?", long_options, NULL)) != EOF) {
+        switch (opt) {
+        case 'g':
+            use_gpu = (bool)(atoi(optarg));
+            break;
+        case '?':
+        default:
+            usage(argv[0]);
+            return 1;
         }
     }
-}
 
-int main(int argc, char** argv) {
     // read input
     fstream infile("data_sliding.csv");
     string line, word;
@@ -136,45 +151,98 @@ int main(int argc, char** argv) {
     init(u_h, hidden_unit * hidden_unit);
     init(dense, hidden_unit);
 
-    print_cuda_info();
+    if (use_gpu) {
+        print_cuda_info();
+        // One iteration, loop through all data point
+        for (int i = 0; i < num_data; i += batch_size) {
 
-    // One iteration, loop through all data point
-    for (int i = 0; i < num_data; i += batch_size) {
+            // batch_size * (num_data * vec_len)
+            int start_i = i;
+            int end_i = min(num_data, i + batch_size);
+            int batch = end_i - start_i;
 
-        // batch_size * (num_data * vec_len)
-        int start_i = i;
-        int end_i = min(num_data, i + batch_size);
-        int batch = end_i - start_i;
+            // for each time step
+            for (int j = 0; j < window_size; j++) {
 
-        // for each time step
-        for (int j = 0; j < window_size; j++) {
-
-            // Construct x_t
-            for (int m = 0; m < batch; m++) {
-                for (int n = 0; n < vec_len; n++) {
-                    x_t[m * vec_len + n] = data[start_i + m][j + n];
+                // Construct x_t
+                for (int m = 0; m < batch; m++) {
+                    for (int n = 0; n < vec_len; n++) {
+                        x_t[m * vec_len + n] = data[start_i + m][j + n];
+                    }
                 }
+
+                // one forward iteration: 
+                gru_forward_cuda(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
+                    w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
+            
+                // for (int k = 0; k < batch_size * hidden_unit; k++)
+                //     cout << h_t_new[k] << endl;
+                
+                memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
+                memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
             }
 
-            // one forward iteration: 
-            gru_forward_cuda(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
-                w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
-           
-            // for (int k = 0; k < batch_size * hidden_unit; k++)
-            //     cout << h_t_new[k] << endl;
+            // inference
+            mat_multiplication(dense, h_t, predict, batch_size, 1, hidden_unit);
+            // for (int k = 0; k < batch_size; k++)
+            //     cout << predict[k] << endl;
+            if (i == 0) {
+                for (int k = 0; k < batch_size; k++) {
+                    cout << predict[k] << " ";
+                }
+                cout << endl;
+            }
             
-            h_t = h_t_new;
-            memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
+            // calculate loss
+            // gru_backward
+            // update variables
+            
         }
+    } else {
+        cout << "Using CPU..." << endl;
+        // One iteration, loop through all data point
+        for (int i = 0; i < num_data; i += batch_size) {
 
-        // inference
-        mat_multiplication_sequential(h_t, dense, predict, batch_size, 1, hidden_unit);
-        // for (int k = 0; k < batch_size; k++)
-        //     cout << predict[k] << endl;
-        
-        // calculate loss
-        // gru_backward
-        // update variables
-        
+            // batch_size * (num_data * vec_len)
+            int start_i = i;
+            int end_i = min(num_data, i + batch_size);
+            int batch = end_i - start_i;
+
+            // for each time step
+            for (int j = 0; j < window_size; j++) {
+
+                // Construct x_t
+                for (int m = 0; m < batch; m++) {
+                    for (int n = 0; n < vec_len; n++) {
+                        x_t[m * vec_len + n] = data[start_i + m][j + n];
+                    }
+                }
+
+                // one forward iteration: 
+                gru_forward(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
+                    w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
+            
+                // for (int k = 0; k < batch_size * hidden_unit; k++)
+                //     cout << h_t_new[k] << endl;
+                
+                memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
+                memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
+            }
+
+            // inference
+            mat_multiplication(dense, h_t, predict, batch_size, 1, hidden_unit);
+            if (i == 0) {
+                for (int k = 0; k < batch_size; k++) {
+                    cout << predict[k] << " ";
+                }
+                cout << endl;
+            }
+                    
+            
+            // calculate loss
+            // gru_backward
+            // update variables
+            
+        }
     }
 }
