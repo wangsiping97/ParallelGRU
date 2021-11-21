@@ -205,6 +205,9 @@ int main() {
     float* b_r = (float*)calloc(hidden_unit, sizeof(float));
     float* b_h = (float*)calloc(hidden_unit, sizeof(float));
 
+    float* dense = (float*)calloc(hidden_unit * 1, sizeof(float));
+    float* predict = (float*)calloc(batch_size * 1, sizeof(float));
+
     // initialize variables
     init(w_z, vec_len * hidden_unit);
     init(w_r, vec_len * hidden_unit);
@@ -212,6 +215,7 @@ int main() {
     init(u_z, hidden_unit * hidden_unit);
     init(u_r, hidden_unit * hidden_unit);
     init(u_h, hidden_unit * hidden_unit);
+    init(dense, hidden_unit);
 
     // One iteration, loop through all data point
     for (int i = 0; i < num_data; i += batch_size) {
@@ -238,13 +242,16 @@ int main() {
             gru_forward(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
                 w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
            
+            for (int k = 0; k < batch_size * hidden_unit; k++)
+                cout << h_t_new[k] << endl;
+            
             h_t = h_t_new;
             memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
         }
         
-        // calculate loss
-        // gru_backward
-        // update variables
-        
+        // inference
+        mat_multiplication(h_t, dense, predict, batch_size, 1, hidden_unit);
+        for (int k = 0; k < batch_size; k++)
+            cout << predict[k] << endl;
     }
 }
