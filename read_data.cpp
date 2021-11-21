@@ -3,6 +3,9 @@
 #include <vector>
 #include <sstream>
 #include <cmath>
+#include <cstring>
+#include <stdio.h>
+#include <cstdlib>
 using namespace std;
 
 void mat_multiplication(float* a, float* b, float* c, int c_width, int c_height, int a_width) {
@@ -50,8 +53,6 @@ void mat_tanh(float* a, int width, int height) {
         a[i] = tanh(a[i]);
     }
 }
-
-
 
 // x_t: width: 28, height: batch_size
 // old_h_t: width: hidden_unit, height: batch_size
@@ -137,7 +138,7 @@ void init(float *weight, size_t size) {
 int main() {
 
     // read input
-    fstream infile("../data_sliding.csv");
+    fstream infile("data_sliding.csv");
     string line, word;
     
     vector<vector<float> > data;
@@ -164,7 +165,7 @@ int main() {
 
     vector<float> y;
 
-    fstream label("../y.csv");
+    fstream label("y.csv");
 
     while (label >> line) {
 
@@ -234,7 +235,7 @@ int main() {
             }
 
             // one forward iteration
-            gru_forward(batch_size, vec_len, x_t, h_t, h_t_new, 
+            gru_forward(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
                 w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
            
             h_t = h_t_new;
