@@ -11,6 +11,7 @@ extern float toBW(int bytes, float sec);
 void mat_multiplication_kernel(float* a, float* b, float* c, int c_width, int c_height, int a_width) {
     for (int i = 0; i < c_height; ++i) {
         for (int j = 0; j < c_width; ++j) {
+            c[i * c_width + j] = 0;
             for (int k = 0; k < a_width; ++k) {
                 c[i * c_width + j] += a[i * a_width + k] * b[k * c_width + j];
             }
@@ -71,14 +72,17 @@ void gru_forward_kernel(int batch_size, int x_width, int hidden_unit,
                 float* w_z, float* w_r, float* w_h,
                 float* u_z, float* u_r, float* u_h,
                 float* b_z, float* b_r, float* b_h) {
+
+    const int threadsPerBlock = 512;
+    int blocks = (hidden_unit * batch_size + threadsPerBlock - 1) / threadsPerBlock;
     
-    // remove after paralleled matrix multiplication
+    // ===================remove after paralleled matrix multiplication
     float* host_x_t = (float*)malloc(batch_size * x_width * sizeof(float));
     cudaMemcpy(host_x_t, x_t, batch_size * x_width * sizeof(float), cudaMemcpyDeviceToHost);
-    float* host_w_z = (float*)malloc(hidden_unit * x_width * sizeof(float));
-    cudaMemcpy(host_w_z, w_z, hidden_unit * x_width * sizeof(float), cudaMemcpyDeviceToHost);
     float* host_old_h_t = (float*)malloc(batch_size * hidden_unit * sizeof(float));
     cudaMemcpy(host_old_h_t, old_h_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
+    float* host_w_z = (float*)malloc(hidden_unit * x_width * sizeof(float));
+    cudaMemcpy(host_w_z, w_z, hidden_unit * x_width * sizeof(float), cudaMemcpyDeviceToHost);
     float* host_u_z = (float*)malloc(hidden_unit * hidden_unit * sizeof(float));
     cudaMemcpy(host_u_z, u_z, hidden_unit * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
     float* host_w_r = (float*)malloc(hidden_unit * x_width * sizeof(float));
@@ -89,71 +93,67 @@ void gru_forward_kernel(int batch_size, int x_width, int hidden_unit,
     cudaMemcpy(host_w_h, w_h, hidden_unit * x_width * sizeof(float), cudaMemcpyDeviceToHost);
     float* host_u_h = (float*)malloc(hidden_unit * hidden_unit * sizeof(float));
     cudaMemcpy(host_u_h, u_h, hidden_unit * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
-    // end remove
     
-    const int threadsPerBlock = 512;
-    int blocks = (hidden_unit * batch_size + threadsPerBlock - 1) / threadsPerBlock;
 
-    float* tmp1 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
-    float* tmp2 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    float* host_tmp1 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    float* host_tmp2 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    // ====================end remove
 
-    float* device_tmp1;
-    float* device_tmp2;
-    cudaMalloc((void **)&device_tmp1, hidden_unit * batch_size * sizeof(float));
-    cudaMalloc((void **)&device_tmp1, hidden_unit * batch_size * sizeof(float));
+    float* tmp1;
+    float* tmp2;
+    cudaMalloc((void **)&tmp1, hidden_unit * batch_size * sizeof(float));
+    cudaMalloc((void **)&tmp1, hidden_unit * batch_size * sizeof(float));
 
     // z_t = sigmoid(x_t * w_z + old_h_t * u_z + b_z)
-    memset(tmp1, 0, hidden_unit * batch_size * sizeof(float));
-    mat_multiplication_kernel(host_x_t, host_w_z, tmp1, hidden_unit, batch_size, x_width);
-    memset(tmp2, 0, hidden_unit * batch_size * sizeof(float));
-    mat_multiplication_kernel(host_old_h_t, host_u_z, tmp2, hidden_unit, batch_size, hidden_unit);
+    mat_multiplication_kernel(host_x_t, host_w_z, host_tmp1, hidden_unit, batch_size, x_width);
+    mat_multiplication_kernel(host_old_h_t, host_u_z, host_tmp2, hidden_unit, batch_size, hidden_unit);
+
+    // ===================remove after paralleled matrix multiplication
+    cudaMemcpy(tmp1, host_tmp1, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(tmp2, host_tmp2, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
+    // ====================end remove
+
     float* z_t;
     cudaMalloc((void **)&z_t, hidden_unit * batch_size * sizeof(float));
-
-    // copy to device
-    cudaMemcpy(device_tmp1, tmp1, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_tmp2, tmp2, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
-
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(device_tmp1, device_tmp2, z_t, hidden_unit, batch_size); 
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, z_t, hidden_unit, batch_size); 
     mat_add_b_kernel<<<blocks, threadsPerBlock>>>(z_t, b_z, z_t, hidden_unit, batch_size);
     mat_sigmoid_kernel<<<blocks, threadsPerBlock>>>(z_t, hidden_unit, batch_size);
 
     // r_t = sigmoid(x_t * w_r + old_h_t * u_r + b_r)
-    memset(tmp1, 0, hidden_unit * batch_size * sizeof(float));
-    mat_multiplication_kernel(host_x_t, host_w_r, tmp1, hidden_unit, batch_size, x_width);
-    memset(tmp2, 0, hidden_unit * batch_size * sizeof(float));
-    mat_multiplication_kernel(host_old_h_t, host_u_r, tmp2, hidden_unit, batch_size, hidden_unit);
+    mat_multiplication_kernel(host_x_t, host_w_r, host_tmp1, hidden_unit, batch_size, x_width);
+    mat_multiplication_kernel(host_old_h_t, host_u_r, host_tmp2, hidden_unit, batch_size, hidden_unit);
+
+    // ===================remove after paralleled matrix multiplication
+    cudaMemcpy(tmp1, host_tmp1, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(tmp2, host_tmp2, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
+    // ====================end remove
+
     float* r_t;
     cudaMalloc((void **)&r_t, hidden_unit * batch_size * sizeof(float));
 
-    // copy to device
-    cudaMemcpy(device_tmp1, tmp1, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_tmp2, tmp2, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
-
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(device_tmp1, device_tmp2, r_t, hidden_unit, batch_size); 
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, r_t, hidden_unit, batch_size); 
     mat_add_b_kernel<<<blocks, threadsPerBlock>>>(r_t, b_r, r_t, hidden_unit, batch_size);
     mat_sigmoid_kernel<<<blocks, threadsPerBlock>>>(r_t, hidden_unit, batch_size);
 
-    // remove after paralleled matrix multiplication
+    // h_hat = phi(x_t * w_h + (r_t . old_h_t) * u_h + b_h)
+    mat_multiplication_kernel(host_x_t, host_w_h, host_tmp1, hidden_unit, batch_size, x_width);
+    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(r_t, old_h_t, r_t, hidden_unit, batch_size);
+
+    // ===================remove after paralleled matrix multiplication
     float* host_r_t = (float*)malloc(batch_size * hidden_unit * sizeof(float));
     cudaMemcpy(host_r_t, r_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
-    // end of remove
-    printf("%.f\n", host_r_t[0]);
+    // ====================end remove
+    mat_multiplication_kernel(host_r_t, host_u_h, host_tmp2, hidden_unit, batch_size, hidden_unit);
 
-    // h_hat = phi(x_t * w_h + (r_t . old_h_t) * u_h + b_h)
-    memset(tmp1, 0, hidden_unit * batch_size * sizeof(float));
-    mat_multiplication_kernel(host_x_t, host_w_h, tmp1, hidden_unit, batch_size, x_width);
-    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(r_t, old_h_t, r_t, hidden_unit, batch_size);
-    memset(tmp2, 0, hidden_unit * batch_size * sizeof(float));
-    mat_multiplication_kernel(host_r_t, host_u_h, tmp2, hidden_unit, batch_size, hidden_unit);
+    // ===================remove after paralleled matrix multiplication
+    cudaMemcpy(tmp1, host_tmp1, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(tmp2, host_tmp2, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
+    // ====================end remove
+
     float* h_hat;
     cudaMalloc((void **)&h_hat, hidden_unit * batch_size * sizeof(float));
 
-    // copy to device
-    cudaMemcpy(device_tmp1, tmp1, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_tmp2, tmp2, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
-
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(device_tmp1, device_tmp2, h_hat, hidden_unit, batch_size); 
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, h_hat, hidden_unit, batch_size); 
     mat_add_b_kernel<<<blocks, threadsPerBlock>>>(h_hat, b_h, h_hat, hidden_unit, batch_size);
     mat_tanh_kernel<<<blocks, threadsPerBlock>>>(h_hat, hidden_unit, batch_size);
 
