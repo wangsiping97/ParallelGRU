@@ -45,6 +45,16 @@ void init(float *weight, size_t size) {
     }
 }
 
+void mat_multiplication_sequential(float* a, float* b, float* c, int c_width, int c_height, int a_width) {
+    for (int i = 0; i < c_height; ++i) {
+        for (int j = 0; j < c_width; ++j) {
+            for (int k = 0; k < a_width; ++k) {
+                c[i * c_width + j] += a[i * a_width + k] * b[k * c_width + j];
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     // read input
     fstream infile("data_sliding.csv");
@@ -114,6 +124,9 @@ int main(int argc, char** argv) {
     float* b_r = (float*)calloc(hidden_unit, sizeof(float));
     float* b_h = (float*)calloc(hidden_unit, sizeof(float));
 
+    float* dense = (float*)calloc(hidden_unit * 1, sizeof(float));
+    float* predict = (float*)calloc(batch_size * 1, sizeof(float));
+
     // initialize variables
     init(w_z, vec_len * hidden_unit);
     init(w_r, vec_len * hidden_unit);
@@ -121,6 +134,7 @@ int main(int argc, char** argv) {
     init(u_z, hidden_unit * hidden_unit);
     init(u_r, hidden_unit * hidden_unit);
     init(u_h, hidden_unit * hidden_unit);
+    init(dense, hidden_unit);
 
     print_cuda_info();
 
@@ -146,9 +160,17 @@ int main(int argc, char** argv) {
             gru_forward_cuda(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
                 w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
            
+            // for (int k = 0; k < batch_size * hidden_unit; k++)
+            //     cout << h_t_new[k] << endl;
+            
             h_t = h_t_new;
             memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
         }
+
+        // inference
+        mat_multiplication_sequential(h_t, dense, predict, batch_size, 1, hidden_unit);
+        // for (int k = 0; k < batch_size; k++)
+        //     cout << predict[k] << endl;
         
         // calculate loss
         // gru_backward
