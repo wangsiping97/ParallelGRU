@@ -120,11 +120,11 @@ int main(int argc, char** argv) {
 
     int num_data = 3000;
     int window_size = 20;
-    int vec_len = 28;
+    int vec_len = 280;
 
-    int batch_size = 50;
+    int batch_size = 500;
 
-    int hidden_unit = 10;
+    int hidden_unit = 100;
 
     // allocate variables
     float* x_t = (float*)calloc(batch_size * vec_len, sizeof(float));
