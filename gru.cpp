@@ -91,4 +91,9 @@ void gru_forward(int batch_size, int x_width,
     mat_hadamard(z_t, h_hat, h_hat, x_width, batch_size);
     mat_add(tmp3, h_hat, new_h_t, x_width, batch_size);
 
+    // free temp arrays
+    free(tmp1);
+    free(tmp2);
+    free(tmp3);
+
 }
