@@ -17,6 +17,12 @@ void mat_add(float* a, float* b, float* res, int width, int height) {
     }
 }
 
+void mat_add_b(float* a, float* b, float* res, int width, int height) {
+    for (int i = 0; i < width * height; ++i) {
+        res[i] = a[i] + b[i % width];
+    }
+}
+
 void mat_one_sub(float* a, float* res, int width, int height) {
     for (int i = 0; i < width * height; ++i) {
         res[i] = 1 - a[i];
@@ -41,7 +47,15 @@ void mat_tanh(float* a, int width, int height) {
     }
 }
 
-void gru_forward(int batch_size, int x_width, 
+
+
+// x_t: width: 28, height: batch_size
+// old_h_t: width: hidden_unit, height: batch_size
+// new_h_t: width: hidden_unit, height: batch_size
+// w_z, w_r, w_h: width: hidden_unit, height: 28
+// u_z, u_r, u_h: width: hidden_unit, height: hidden_unit
+// b_z, b_r, b_h: width: hidden_unit, height: 1
+void gru_forward(int batch_size, int x_width, int hidden_unit,
                 float* x_t, float* old_h_t, float* new_h_t,
                 float* w_z, float* w_r, float* w_h,
                 float* u_z, float* u_r, float* u_h,
@@ -50,50 +64,53 @@ void gru_forward(int batch_size, int x_width,
     // initialize new_h_t
     memset(new_h_t, 0, sizeof(new_h_t));
 
-    float* tmp1 = (float*)malloc(x_width * batch_size * sizeof(float));
-    float* tmp2 = (float*)malloc(x_width * batch_size * sizeof(float));
+    float* tmp1 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    float* tmp2 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
 
-    // z_t = sigmoid(w_z * x_t + u_z * old_h_t + b_z)
+    // z_t = sigmoid(x_t * w_z + u_z * old_h_t + b_z)
     memset(tmp1, 0, sizeof(tmp1));
-    mat_multiplication(w_z, x_t, tmp1, x_width, batch_size, batch_size);
+    mat_multiplication(x_t, w_z, tmp1, hidden_unit, batch_size, x_width);
     memset(tmp2, 0, sizeof(tmp2));
-    mat_multiplication(u_z, old_h_t, tmp2, x_width, batch_size, batch_size);
-    float* z_t = (float*)malloc(x_width * batch_size * sizeof(float));
-    mat_add(tmp1, tmp2, z_t, x_width, batch_size);
-    mat_add(z_t, b_z, z_t, x_width, batch_size);
-    mat_sigmoid(z_t, x_width, batch_size);
+    mat_multiplication(u_z, old_h_t, tmp2, hidden_unit, batch_size, hidden_unit);
+    float* z_t = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    mat_add(tmp1, tmp2, z_t, hidden_unit, batch_size);
+    mat_add_b(z_t, b_z, z_t, hidden_unit, batch_size);
+    mat_sigmoid(z_t, hidden_unit, batch_size);
 
-    // r_t = sigmoid(w_r * x_t + u_r * old_h_t + b_r)
+    // r_t = sigmoid(x_t * w_r + u_r * old_h_t + b_r)
     memset(tmp1, 0, sizeof(tmp1));
-    mat_multiplication(w_r, x_t, tmp1, x_width, batch_size, batch_size);
+    mat_multiplication(x_t, w_r, tmp1, hidden_unit, batch_size, x_width);
     memset(tmp2, 0, sizeof(tmp2));
-    mat_multiplication(u_r, old_h_t, tmp2, x_width, batch_size, batch_size);
-    float* r_t = (float*)malloc(x_width * batch_size * sizeof(float));
-    mat_add(tmp1, tmp2, r_t, x_width, batch_size);
-    mat_add(r_t, b_r, r_t, x_width, batch_size);
-    mat_sigmoid(r_t, x_width, batch_size);
+    mat_multiplication(u_r, old_h_t, tmp2, hidden_unit, batch_size, hidden_unit);
+    float* r_t = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    mat_add(tmp1, tmp2, r_t, hidden_unit, batch_size);
+    mat_add_b(r_t, b_r, r_t, hidden_unit, batch_size);
+    mat_sigmoid(r_t, hidden_unit, batch_size);
 
-    // h_hat = phi(w_h*x_t + u_h(r_t . old_h_t) + b_h)
+    // h_hat = phi(x_t * w_h + u_h(r_t . old_h_t) + b_h)
     memset(tmp1, 0, sizeof(tmp1));
-    mat_multiplication(w_h, x_t, tmp1, x_width, batch_size, batch_size);
-    mat_hadamard(r_t, old_h_t, r_t, x_width, batch_size);
+    mat_multiplication(x_t, w_h, tmp1, hidden_unit, batch_size, x_width);
+    mat_hadamard(r_t, old_h_t, r_t, hidden_unit, batch_size);
     memset(tmp2, 0, sizeof(tmp2));
-    mat_multiplication(u_h, r_t, tmp2, x_width, batch_size, batch_size);
-    float* h_hat = (float*)malloc(x_width * batch_size * sizeof(float));
-    mat_add(tmp1, tmp2, h_hat, x_width, batch_size);
-    mat_add(h_hat, b_h, h_hat, x_width, batch_size);
-    mat_tanh(h_hat, x_width, batch_size);
+    mat_multiplication(u_h, r_t, tmp2, hidden_unit, batch_size, hidden_unit);
+    float* h_hat = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    mat_add(tmp1, tmp2, h_hat, hidden_unit, batch_size);
+    mat_add_b(h_hat, b_h, h_hat, hidden_unit, batch_size);
+    mat_tanh(h_hat, hidden_unit, batch_size);
 
     // new_h_t = (1-z_t).old_h_t + z_t.h_hat
-    float* tmp3 = (float*)malloc(x_width * batch_size * sizeof(float));
-    mat_one_sub(z_t, tmp3, x_width, batch_size);
-    mat_hadamard(tmp3, old_h_t, tmp3, x_width, batch_size);
-    mat_hadamard(z_t, h_hat, h_hat, x_width, batch_size);
-    mat_add(tmp3, h_hat, new_h_t, x_width, batch_size);
+    float* tmp3 = (float*)malloc(hidden_unit * batch_size * sizeof(float));
+    mat_one_sub(z_t, tmp3, hidden_unit, batch_size);
+    mat_hadamard(tmp3, old_h_t, tmp3, hidden_unit, batch_size);
+    mat_hadamard(z_t, h_hat, h_hat, hidden_unit, batch_size);
+    mat_add(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
 
     // free temp arrays
     free(tmp1);
     free(tmp2);
     free(tmp3);
+    free(z_t);
+    free(r_t);
+    free(h_hat);
 
 }
