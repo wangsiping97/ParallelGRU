@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <getopt.h>
 #include "gru_sequential.h"
+#include "CycleTimer.h"
 
 using namespace std;
 
@@ -153,6 +154,7 @@ int main(int argc, char** argv) {
 
     if (use_gpu) {
         print_cuda_info();
+        double startTime = CycleTimer::currentSeconds();
         // One iteration, loop through all data point
         for (int i = 0; i < num_data; i += batch_size) {
 
@@ -198,8 +200,11 @@ int main(int argc, char** argv) {
             // update variables
             
         }
+        double endTime = CycleTimer::currentSeconds();
+        printf("GPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
     } else {
         cout << "Using CPU..." << endl;
+        double startTime = CycleTimer::currentSeconds();
         // One iteration, loop through all data point
         for (int i = 0; i < num_data; i += batch_size) {
 
@@ -244,5 +249,7 @@ int main(int argc, char** argv) {
             // update variables
             
         }
+        double endTime = CycleTimer::currentSeconds();
+        printf("CPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
     }
 }
