@@ -13,7 +13,7 @@
 
 using namespace std;
 
-void gru_forward_cuda(int batch_size, int x_width, int hidden_unit,
+double gru_forward_cuda(int batch_size, int x_width, int hidden_unit,
                 float* x_t, float* old_h_t, float* new_h_t,
                 float* w_z, float* w_r, float* w_h,
                 float* u_z, float* u_r, float* u_h,
@@ -155,6 +155,7 @@ int main(int argc, char** argv) {
     if (use_gpu) {
         print_cuda_info();
         double startTime = CycleTimer::currentSeconds();
+        double kernalTime = 0;
         // One iteration, loop through all data point
         for (int i = 0; i < num_data; i += batch_size) {
 
@@ -174,7 +175,7 @@ int main(int argc, char** argv) {
                 }
 
                 // one forward iteration: 
-                gru_forward_cuda(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
+                kernalTime += gru_forward_cuda(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
                     w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
             
                 // for (int k = 0; k < batch_size * hidden_unit; k++)
@@ -202,6 +203,7 @@ int main(int argc, char** argv) {
         }
         double endTime = CycleTimer::currentSeconds();
         printf("GPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
+        printf("GPU Kernel: %.3f ms\n", 1000.f * kernalTime);
     } else {
         cout << "Using CPU..." << endl;
         double startTime = CycleTimer::currentSeconds();
