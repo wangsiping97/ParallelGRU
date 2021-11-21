@@ -102,7 +102,7 @@ void gru_forward_kernel(int batch_size, int x_width, int hidden_unit,
     float* tmp1;
     float* tmp2;
     cudaMalloc((void **)&tmp1, hidden_unit * batch_size * sizeof(float));
-    cudaMalloc((void **)&tmp1, hidden_unit * batch_size * sizeof(float));
+    cudaMalloc((void **)&tmp2, hidden_unit * batch_size * sizeof(float));
 
     // z_t = sigmoid(x_t * w_z + old_h_t * u_z + b_z)
     mat_multiplication_kernel(host_x_t, host_w_z, host_tmp1, hidden_unit, batch_size, x_width);
@@ -161,7 +161,7 @@ void gru_forward_kernel(int batch_size, int x_width, int hidden_unit,
     float* tmp3;
     cudaMalloc((void **)&tmp3, hidden_unit * batch_size * sizeof(float));
     mat_one_sub_kernel<<<blocks, threadsPerBlock>>>(z_t, tmp3, hidden_unit, batch_size);
-    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(tmp3, old_h_t, h_hat, hidden_unit, batch_size);
+    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(tmp3, old_h_t, tmp3, hidden_unit, batch_size);
     mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(z_t, h_hat, h_hat, hidden_unit, batch_size);
     mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
 
