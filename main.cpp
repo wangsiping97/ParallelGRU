@@ -20,7 +20,7 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int vec_l
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
-                        float* dense, float* predict, vector<vector<float> >& data);
+                        float* dense, float* predict, float* data, int m, int n);
 
 // return GB/s
 float toBW(int bytes, float sec) {
@@ -99,6 +99,16 @@ int main(int argc, char** argv) {
     // read label
     // cout << data[0][0] << endl;
     // cout << data.size() << endl;
+    
+    // copy data into an array
+    int m = data.size();
+    int n = data[0].size();
+    float* arr_data = (float*)calloc(m * n, sizeof(float));
+    for (int i = 0; i < m; ++i) {
+        for (int j = 0; j < n; ++j) {
+            arr_data[i * n + j] = data[i][j];
+        }
+    }
 
     vector<float> y;
 
@@ -162,14 +172,13 @@ int main(int argc, char** argv) {
                             w_z, w_r, w_h,
                             u_z, u_r, u_h,
                             b_z, b_r, b_h,
-                            dense, predict, data);
+                            dense, predict, arr_data, m , n);
         return 0;
     } 
 
     // using CPU
     cout << "Using CPU..." << endl;
     double startTime = CycleTimer::currentSeconds();
-    double computeTime = 0.0;
     // One iteration, loop through all data point
     for (int i = 0; i < num_data; i += batch_size) {
 
@@ -182,13 +191,11 @@ int main(int argc, char** argv) {
         for (int j = 0; j < window_size; j++) {
 
             // Construct x_t
-            for (int m = 0; m < batch; m++) {
-                for (int n = 0; n < vec_len; n++) {
-                    x_t[m * vec_len + n] = data[start_i + m][j + n];
+            for (int _m = 0; _m < batch; _m++) {
+                for (int _n = 0; _n < vec_len; _n++) {
+                    x_t[_m * vec_len + _n] = arr_data[(start_i + _m) * n + j + _n];
                 }
             }
-
-            double computeStartTime = CycleTimer::currentSeconds();
 
             // one forward iteration: 
             gru_forward(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
@@ -199,9 +206,6 @@ int main(int argc, char** argv) {
             
             memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
             memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
-
-            double computeEndTIme = CycleTimer::currentSeconds();
-            computeTime += computeEndTIme - computeStartTime;
         }
 
         // inference
@@ -221,5 +225,5 @@ int main(int argc, char** argv) {
     }
     double endTime = CycleTimer::currentSeconds();
     printf("CPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
-    printf("CPU Compute: %.3f ms\n", 1000.f * computeTime);
+
 }

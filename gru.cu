@@ -12,6 +12,16 @@ using namespace std;
 extern float toBW(int bytes, float sec);
 
 __global__ void
+copy_data_kernel(float* x_t, int x_height, int x_width, float* data, int m, int n, int start_i, int j) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int index_y = index / x_width;
+    int index_x = index % x_width;
+    if (index < x_height * x_width) {
+        x_t[index] = data[(start_i + index_y) * n + j + index_x];
+    }
+}
+
+__global__ void
 mat_init_zeros_kernel(float* a, int size) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index < size) {
@@ -151,12 +161,13 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
-                        float* dense, float* predict, vector<vector<float> >& data) {
+                        float* dense, float* predict, float* arr_data, int m, int n) {
 
     double startTime = CycleTimer::currentSeconds();
-    double kernalTime = 0;
 
     // allocate variables
+    float *device_data;
+
     float *device_x_t;
     float *device_old_h_t;
     float *device_new_h_t;
@@ -173,6 +184,8 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
     float *device_dense;
     float *device_predict;
 
+    cudaMalloc((void**)&device_data, m * n * sizeof(float));
+
     cudaMalloc((void **)&device_x_t, batch_size * x_width * sizeof(float));
     cudaMalloc((void **)&device_old_h_t, batch_size * hidden_unit * sizeof(float));
     cudaMalloc((void **)&device_new_h_t, batch_size * hidden_unit * sizeof(float));
@@ -188,6 +201,8 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
 
     cudaMalloc((void **)&device_dense, hidden_unit * 1 * sizeof(float));
     cudaMalloc((void **)&device_predict, batch_size * 1 * sizeof(float));
+
+    cudaMemcpy(device_data, arr_data, m * n * sizeof(float), cudaMemcpyHostToDevice);
 
     cudaMemcpy(device_old_h_t, old_h_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(device_new_h_t, new_h_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyHostToDevice);
@@ -206,8 +221,9 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
     const int threadsPerBlock = 512;
     const int blocks_h = (hidden_unit * batch_size + threadsPerBlock - 1) / threadsPerBlock;
     const int blocks_predict = (batch_size + threadsPerBlock - 1) / threadsPerBlock;
+    const int blocks_x = (x_width * batch_size + threadsPerBlock - 1) / threadsPerBlock;
 
-
+    double iterStartTime = CycleTimer::currentSeconds();
     // One iteration, loop through all data point
     for (int i = 0; i < num_data; i += batch_size) {
 
@@ -217,28 +233,18 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
         int batch = end_i - start_i;
 
         // for each time step
+        
         for (int j = 0; j < window_size; j++) {
 
-            // Construct x_t
-            for (int m = 0; m < batch; m++) {
-                for (int n = 0; n < x_width; n++) {
-                    x_t[m * x_width + n] = data[start_i + m][j + n];
-                }
-            }
-
-            cudaMemcpy(device_x_t, x_t, batch_size * x_width * sizeof(float), cudaMemcpyHostToDevice);
+            copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
 
             // one forward iteration: 
-            double kernelStartTime = CycleTimer::currentSeconds();
-
             gru_forward_kernel(batch_size, x_width, hidden_unit, device_x_t, device_old_h_t, device_new_h_t, 
                 device_w_z, device_w_r, device_w_h, device_u_z, device_u_r, device_u_h, device_b_z, device_b_r, device_b_h); 
         
             mat_copy_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, device_new_h_t, batch_size * hidden_unit);
             mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(device_new_h_t, batch_size * hidden_unit);
 
-            double kernelEndTime = CycleTimer::currentSeconds();
-            kernalTime += kernelEndTime - kernelStartTime;
         }
 
         // inference
@@ -257,9 +263,7 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
         // update variables
         
     }
-    double endTime = CycleTimer::currentSeconds();
-    printf("GPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
-    printf("GPU Kernel: %.3f ms\n", 1000.f * kernalTime);
+    double iterEndTime = CycleTimer::currentSeconds();
 
     cudaFree(device_x_t);
     cudaFree(device_old_h_t);
@@ -275,6 +279,11 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
     cudaFree(device_b_r);
     cudaFree(device_dense);
     cudaFree(device_predict);
+
+    double endTime = CycleTimer::currentSeconds();
+    printf("GPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
+    printf("GPU Compute: %.3f ms\n", 1000.f * (iterEndTime - iterStartTime));
+    
 }
 
 
