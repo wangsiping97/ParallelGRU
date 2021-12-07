@@ -47,13 +47,38 @@ void mat_tanh(float* a, int width, int height) {
     }
 }
 
+float* mat_transpose(float *a, int width, int height) {
+    float *tmp = (float*)malloc(width * height * sizeof(float));
+
+    // transpose a into tmp
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            tmp[j * height + i] = a[i * width + j];
+        }
+    }
+
+    return tmp;
+}
+
+void update_variable(float *a, float *grad, int width, int height, float step_size) {
+    for (int i = 0; i < width * height; i++) {
+        a[i * width + j] -= step_size * grad;
+    }
+}
+
+// calculate the sum of a over rows and write result to b
+// sum_over_rows(float *a, float *b, int width, int height) {};
+
+
 // x_t: width: 28, height: batch_size
 // old_h_t: width: hidden_unit, height: batch_size
 // new_h_t: width: hidden_unit, height: batch_size
 // w_z, w_r, w_h: width: hidden_unit, height: 28
 // u_z, u_r, u_h: width: hidden_unit, height: hidden_unit
 // b_z, b_r, b_h: width: hidden_unit, height: 1
-void gru_forward(int batch_size, int x_width, int hidden_unit,
+void gru_forward(int timestep, float* Z, float H, float H_hat, 
+                float R, 
+                int batch_size, int x_width, int hidden_unit,
                 float* x_t, float* old_h_t, float* new_h_t,
                 float* w_z, float* w_r, float* w_h,
                 float* u_z, float* u_r, float* u_h,
@@ -100,6 +125,18 @@ void gru_forward(int batch_size, int x_width, int hidden_unit,
     mat_hadamard(z_t, h_hat, h_hat, hidden_unit, batch_size);
     mat_add(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
 
+    copy_array(z_t, Z, timestep * hidden_unit * batch_size, (timestep+1) * hidden_unit * batch_size);
+    copy_array(r_t, R, timestep * hidden_unit, batch_size, (timestep+1) * hidden_unit, batch_size);
+    copy_array(h_hat, H_hat, timestep * hidden_unit * batch_size, (timestep+1) * hidden_unit * batch_size);
+    copy_array(h, H, timestep * hidden_unit * batch_size, (timestep+1) * hidden_unit * batch_size);
+
+    free(tmp1);
+    free(tmp2);
+    free(tmp3);
+    free(z_t);
+    free(r_t);
+    free(h_hat);
 }
+
 
 #endif // _GRU_SEQUANTIAL_H_
