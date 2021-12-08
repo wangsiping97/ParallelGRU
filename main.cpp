@@ -47,8 +47,15 @@ float random_num() {
 void init(float *weight, size_t size) {
 
     for (size_t i = 0; i < size; i++) {
-        weight[i] = random_num();
+        weight[i] = random_num() / 1000;
     }
+}
+
+void Print(float *a, int width, int height) {
+    for (int i = 0; i < width * height; i++) {
+        cout << a[i] << " ";
+    }
+    cout << endl;
 }
 
 int main(int argc, char** argv) {
@@ -137,6 +144,7 @@ int main(int argc, char** argv) {
     int batch_size = 500;
 
     int hidden_unit = 100;
+    float step_size = 0.00001;
 
     // allocate variables
     float* x_t = (float*)calloc(batch_size * vec_len, sizeof(float));
@@ -152,13 +160,31 @@ int main(int argc, char** argv) {
     float* b_r = (float*)calloc(hidden_unit, sizeof(float));
     float* b_h = (float*)calloc(hidden_unit, sizeof(float));
 
+    float *z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float *r_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float *h_hat = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float *h_t_1 = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+
+    float *Z = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+    float *R = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+    float *H_hat = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+    float *H_1 = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+
     float* dense = (float*)calloc(hidden_unit * 1, sizeof(float));
     float* predict = (float*)calloc(batch_size * 1, sizeof(float));
 
-    float* grad_h = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
     float* grad_dense = (float*)calloc(hidden_unit * 1, sizeof(float));
     float* grad_predict = (float*)calloc(batch_size * 1, sizeof(float));
+    float* Grad_w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
+    float* Grad_w_r = (float*)calloc(vec_len * hidden_unit, sizeof(float));
+    float* Grad_w_h = (float*)calloc(vec_len * hidden_unit, sizeof(float));
+    float* Grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+    float* Grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+    float* Grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+    float* Grad_b_z = (float*)calloc(hidden_unit, sizeof(float));
+    float* Grad_b_r = (float*)calloc(hidden_unit, sizeof(float));
+    float* Grad_b_h = (float*)calloc(hidden_unit, sizeof(float)); 
+
     float* grad_w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
     float* grad_w_r = (float*)calloc(vec_len * hidden_unit, sizeof(float));
     float* grad_w_h = (float*)calloc(vec_len * hidden_unit, sizeof(float));
@@ -167,7 +193,15 @@ int main(int argc, char** argv) {
     float* grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
     float* grad_b_z = (float*)calloc(hidden_unit, sizeof(float));
     float* grad_b_r = (float*)calloc(hidden_unit, sizeof(float));
-    float* grad_b_h = (float*)calloc(hidden_unit, sizeof(float));    
+    float* grad_b_h = (float*)calloc(hidden_unit, sizeof(float));   
+    float* grad_r_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float* grad_r_t_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float* grad_z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float* grad_z_t_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float)); 
+    float* grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float* grad_h_hat = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float* grad_h_hat_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float* grad_h_t_1 = (float*)calloc(batch_size * hidden_unit, sizeof(float));
 
 
     // initialize variables
@@ -202,6 +236,16 @@ int main(int argc, char** argv) {
         int end_i = min(num_data, i + batch_size);
         int batch = end_i - start_i;
 
+        // reset gradients
+        memset(Grad_w_z, 0.f, vec_len * hidden_unit * sizeof(float));
+        memset(Grad_w_r, 0.f, vec_len * hidden_unit * sizeof(float));
+        memset(Grad_w_h, 0.f, vec_len * hidden_unit * sizeof(float));
+        memset(Grad_u_z, 0.f, hidden_unit * hidden_unit * sizeof(float));
+        memset(Grad_u_r, 0.f, hidden_unit * hidden_unit * sizeof(float));
+        memset(Grad_u_h, 0.f, hidden_unit * hidden_unit * sizeof(float));
+        memset(Grad_b_z, 0.f, hidden_unit * sizeof(float));
+        memset(Grad_b_r, 0.f, hidden_unit * sizeof(float));
+        memset(Grad_b_h, 0.f, hidden_unit * sizeof(float));
 
         // for each time step
         for (int j = 0; j < window_size; j++) {
@@ -214,24 +258,17 @@ int main(int argc, char** argv) {
             }
 
             // one forward iteration: 
-            gru_forward(batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
+            gru_forward(j, Z, H_hat, H_1, R, 
+                batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
                 w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
-          
-            // for (int k = 0; k < batch_size * hidden_unit; k++)
-            //     cout << h_t_new[k] << endl;
-            
+
+            // update h_t for next round
             memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
             memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
         }
 
         // inference
         mat_multiplication(h_t, dense, predict, 1, batch_size, hidden_unit);
-        // if (i == 0) {
-        //     for (int k = 0; k < batch_size; k++) {
-        //         cout << predict[k] << " ";
-        //     }
-        //     cout << endl;
-        // }
 
         float loss = 0.f;
         float diff;
@@ -250,41 +287,26 @@ int main(int argc, char** argv) {
         // reset gradients
         memset(grad_predict, 0.f, batch_size * sizeof(float));
         memset(grad_dense, 0.f, hidden_unit * sizeof(float));
-        memset(grad_h, 0.f, batch_size * hidden_unit * sizeof(float));
+        memset(grad_h_t, 0.f, batch_size * hidden_unit * sizeof(float));
           
         // gru_backward
         
-        // grad_predict = d loss / d predict = 2 * loss/batch * (predict - y)
+        // d loss / d predict
         for (int _m = 0; _m < batch; _m++) {
             grad_predict[_m] = predict[_m] - y[start_i + _m];
             grad_predict[_m] *= 2 * loss / batch;
         }
-/*
-        for (int _m = 0; _m < batch; _m++) {  
-            cout << grad_predict[_m] << " ";
-        }
-*/
-        // grad_h = d loss / d h_t = grad_predict @ dense.T
-        // dense is a 1-D array, so transpose is switch width and height in matmul
-        mat_multiplication(grad_predict, dense, grad_h, hidden_unit, batch_size, 1);
-/*
-        for (int _m = 0; _m < batch_size * hidden_unit; _m++) {
-            cout << grad_h[_m] << " ";
-        }
-*/
-        // grad_dense = d loss / d dense = h_t.T @ grad_predict
+
+        // d loss / d final_h_t
+        mat_multiplication(grad_predict, dense, grad_h_t, hidden_unit, batch_size, 1);
+
+        // d loss / d dense
         float *h_t_T = mat_transpose(h_t, batch_size, hidden_unit);
         mat_multiplication(h_t_T, grad_predict, grad_dense, 1, hidden_unit, batch_size);
-
-        for (int _m = 0; _m < hidden_unit * 1; _m ++) {
-            cout << grad_dense[_m] << " ";
-        }
-
-        // update dense matrix
-//        update_variable(dense, grad_dense, hidden_unit, 1, step_size);
+        free(h_t_T);
 
         // calculate gradient for each time_step
-        for (int j = 0; j < window_size; j++) {
+        for (int j = window_size-1; j > window_size-2; j--) {
 
             // Construct x_t
             for (int _m = 0; _m < batch; _m++) {
@@ -293,8 +315,23 @@ int main(int argc, char** argv) {
                 }
             }
 
-            // reset gradients
-            memset(grad_h_t, 0.f, batch_size * hidden_unit * sizeof(float));
+            // fetch z_t, r_t, h_hat, h_t_1, h_t
+            for (int i = 0; i < batch_size * hidden_unit; i++) {
+                z_t[i] = Z[j*hidden_unit*batch_size + i];
+                r_t[i] = R[j*hidden_unit*batch_size + i];
+                h_hat[i] = H_hat[j*hidden_unit*batch_size + i];
+                h_t_1[i] = H_1[j*hidden_unit*batch_size + i];
+            }
+
+            if (j != window_size - 1) {
+
+                for (int i = 0; i < batch_size * hidden_unit; i++) {
+                    h_t[i] = H_1[(j+1)*batch_size*hidden_unit];
+                }
+            }
+
+            // reset gradients for current timestep
+            memset(grad_h_t_1, 0.f, batch_size * hidden_unit * sizeof(float));
             memset(grad_w_z, 0.f, vec_len * hidden_unit * sizeof(float));
             memset(grad_w_r, 0.f, vec_len * hidden_unit * sizeof(float));
             memset(grad_w_h, 0.f, vec_len * hidden_unit * sizeof(float));
@@ -305,75 +342,140 @@ int main(int argc, char** argv) {
             memset(grad_b_r, 0.f, hidden_unit * sizeof(float));
             memset(grad_b_h, 0.f, hidden_unit * sizeof(float));
 
-            // fetch variables of current step: h_hat, h_t, z_t, r_t
-
             // for current timestep:
             // d loss / d z_t
-            grad_z_t = mat_hadamard(grad_h, h_hat - h_t);
+            float *tmp = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+            mat_sub(h_hat, h_t, tmp, hidden_unit, batch_size);
+            mat_hadamard(grad_h_t, tmp, grad_z_t, hidden_unit, batch_size);
+            //Print(grad_z_t, hidden_unit, batch_size);
 
-            // d loss / d ht
-            grad_h_t += mat_hadamard(grad_h, 1 - z_t);
+            // d loss / d h_t_1
+            mat_one_sub(z_t, tmp, hidden_unit, batch_size);
+            mat_add(grad_h_t, tmp, grad_h_t_1, hidden_unit, batch_size);
+            //Print(grad_h_t_1, hidden_unit, batch_size);
 
             // d loss / d h_hat
-            grad_h_hat += mat_hadamard(grad_h, z_t);
+            mat_hadamard(grad_h_t, z_t, grad_h_hat, hidden_unit, batch_size);
+            //Print(grad_h_hat, hidden_unit, batch_size);
 
             // d loss / d h_hat_before_sigmoid
-            grad_h_hat_before_sigmoid = grad_h_hat * (1 - grad_h_hat);
+            mat_one_sub(grad_h_hat, tmp, hidden_unit, batch_size);
+            mat_hadamard(grad_h_hat, tmp, grad_h_hat_before_sigmoid, hidden_unit, batch_size);
+            //Print(grad_h_hat_before_sigmoid, hidden_unit, batch_size);
 
             // d loss / Wh 
-            grad_w_h = grad_h_hat_before_sigmoid @ x_t;
+            // tmp2: transpose of x_t
+            float* tmp2 = mat_transpose(x_t, vec_len, batch_size);
+            mat_multiplication(tmp2, grad_h_hat_before_sigmoid, grad_w_h, hidden_unit, vec_len, batch_size);
+            //Print(grad_w_h, hidden_unit, vec_len);
 
-            // d loss / Uh
-            grad_u_h = grad_h_hat_before_sigmoid @ (rt * h_t);
+            // d loss / u_h
+            mat_hadamard(r_t, h_t_1, tmp, hidden_unit, batch_size);
+            float *tmp3 = mat_transpose(tmp, hidden_unit, batch_size);
+            mat_multiplication(tmp3, grad_h_hat_before_sigmoid, grad_u_h, hidden_unit, hidden_unit, batch_size);
+            //Print(grad_u_h, hidden_unit, hidden_unit);
 
             // d loss / b_h
-            sum_over_rows(grad_h_hat_before_sigmoid, grad_b_h);
+            sum_over_rows(grad_h_hat_before_sigmoid, grad_b_h, hidden_unit, batch_size);
+            //Print(grad_b_h, hidden_unit, 1);
 
             // d loss / r_t
-            grad_r_t = (grad_h_hat_before_sigmoid @ u_h) * h_t;
+            float *tmp4 = mat_transpose(u_h, hidden_unit, hidden_unit);
+            mat_multiplication(grad_h_hat_before_sigmoid, tmp4, tmp, hidden_unit, batch_size, hidden_unit);
+            mat_div(tmp, h_t_1, grad_r_t, hidden_unit, batch_size);
+            //Print(grad_r_t, hidden_unit, batch_size);
 
             // d loss / h_t
-            grad_h_t += (grad_h_hat_before_sigmoid @ u_h) * r_t;
+            mat_div(tmp, r_t, tmp, hidden_unit, batch_size);
+            mat_add(grad_h_t_1, tmp, grad_h_t_1, hidden_unit, batch_size);
+            //Print(grad_h_t_1, hidden_unit, batch_size);
 
             // d loss / d r_t_before_sigmoid
-            grad_r_t_before_sigmoid = grad_r_t * (1 - grad_r_t);
+            mat_one_sub(grad_r_t, tmp, hidden_unit, batch_size);
+            mat_hadamard(grad_r_t, tmp, grad_r_t_before_sigmoid, hidden_unit, batch_size);
+            //Print(grad_r_t_before_sigmoid, hidden_unit, batch_size);
 
             // d loss / d w_r
-            grad_w_r = grad_r_t_before_sigmoid @ x_t;
+            mat_multiplication(tmp2, grad_r_t_before_sigmoid, grad_w_r, hidden_unit, vec_len, batch_size);
+            //Print(grad_w_r, hidden_unit, vec_len);
 
             // d loss / d u_r
-            grad_u_r = grad_r_t_before_sigmoid @ h_t;
+            free(tmp3);
+            tmp3 = mat_transpose(h_t_1, hidden_unit, batch_size);
+            mat_multiplication(tmp3, grad_r_t_before_sigmoid, grad_u_r, hidden_unit, hidden_unit, batch_size);
+            //Print(grad_u_r, hidden_unit, hidden_unit);
 
             // d loss / d b_r
-            sum_over_rows(grad_r_t_before_sigmoid, grad_b_h);
+            sum_over_rows(grad_r_t_before_sigmoid, grad_b_r, hidden_unit, batch_size);
+            //Print(grad_b_r, hidden_unit, 1);
 
             // d loss / d h_t
-            grad_h_t += (grad_r_t_before_sigmoid) @ u_r;
+            free(tmp4);
+            tmp4 = mat_transpose(u_r, hidden_unit, hidden_unit);
+            mat_multiplication(grad_r_t_before_sigmoid, tmp4, tmp, hidden_unit, batch_size, hidden_unit);
+
+            mat_add(grad_h_t_1, tmp, grad_h_t_1, hidden_unit, batch_size);
+            //Print(grad_h_t_1, hidden_unit, batch_size);
 
             // d loss / d z_t_before_sigmoid
-            grad_z_t_before_sigmoid = grad_z_t * (1 - grad_z_t);
+            mat_one_sub(grad_z_t, tmp, hidden_unit, batch_size);
+            mat_hadamard(grad_z_t, tmp, grad_z_t_before_sigmoid, hidden_unit, batch_size);
+            //Print(grad_z_t_before_sigmoid, hidden_unit, batch_size);
 
             // d loss / d w_z
-            grad_w_z = grad_z_t_before_sigmoid @ x_t;
+            mat_multiplication(tmp2, grad_z_t_before_sigmoid, grad_w_z, hidden_unit, vec_len, batch_size);
+            //Print(grad_w_z, hidden_unit, vec_len);
 
             // d loss / d u_z
-            grad_u_z = grad_z_t_before_sigmoid @ h_t;
+            mat_multiplication(tmp3, grad_z_t_before_sigmoid, grad_u_z, hidden_unit, hidden_unit, batch_size);
+            //Print(grad_u_z, hidden_unit, hidden_unit);
 
             // d loss / d b_z
-            sum_over_rows(grad_z_t_before_sigmoid, grad_b_z);
+            sum_over_rows(grad_z_t_before_sigmoid, grad_b_z, hidden_unit, batch_size);
+            //Print(grad_b_z, hidden_unit, 1);
 
             // d loss / d h_t;
-            grad_h_t += (grad_z_t_before_sigmoid) @ u_z;
+            free(tmp4);
+            tmp4 = mat_transpose(u_z, hidden_unit, hidden_unit);
+            mat_multiplication(grad_z_t_before_sigmoid, tmp4, tmp, hidden_unit, batch_size, hidden_unit);
+            mat_add(grad_h_t_1, tmp, grad_h_t_1, hidden_unit, batch_size);
+            //Print(grad_h_t_1, hidden_unit, batch_size);
 
             // loss for next timestep
-            grad_h = grad_h_t;
+            memcpy(grad_h_t_1, grad_h_t, batch_size * hidden_unit * sizeof(float));
+            //Print(grad_h_t, batch_size, hidden_unit);
 
             // cumulate gradient for all timesteps;
-            // cumulate_gradients();
+
+            mat_add(Grad_w_z, grad_w_z, Grad_w_z, hidden_unit, vec_len);
+            mat_add(Grad_w_r, grad_w_r, Grad_w_r, hidden_unit, vec_len);
+            mat_add(Grad_w_h, grad_w_h, Grad_w_h, hidden_unit, vec_len);
+
+            mat_add(Grad_u_z, grad_u_z, Grad_u_z, hidden_unit, hidden_unit);
+            mat_add(Grad_u_r, grad_u_r, Grad_u_r, hidden_unit, hidden_unit);
+            mat_add(Grad_u_h, grad_u_h, Grad_u_h, hidden_unit, hidden_unit);
+
+            mat_add(Grad_b_z, grad_b_z, Grad_b_z, hidden_unit, 1);
+            mat_add(Grad_b_r, grad_b_r, Grad_b_r, hidden_unit, 1);
+            mat_add(Grad_b_h, grad_b_h, Grad_b_h, hidden_unit, 1);
         }
 
         // update variables
-//        update_variables();       
+        update_variable(dense, grad_dense, hidden_unit, 1, step_size);
+        
+        update_variable(w_z, Grad_w_z, hidden_unit, vec_len, step_size);
+        update_variable(w_r, Grad_w_r, hidden_unit, vec_len, step_size);
+        update_variable(w_h, Grad_w_h, hidden_unit, vec_len, step_size);
+
+        update_variable(u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
+        update_variable(u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
+        update_variable(u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
+
+        update_variable(b_z, Grad_b_z, hidden_unit, 1, step_size);
+        update_variable(b_r, Grad_b_r, hidden_unit, 1, step_size);
+        update_variable(b_h, Grad_b_h, hidden_unit, 1, step_size);
+
+        //Print(b_h, hidden_unit, 1);
     }
 
 

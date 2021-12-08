@@ -47,6 +47,24 @@ void mat_tanh(float* a, int width, int height) {
     }
 }
 
+void mat_sub(float* a, float* b, float* res, int width, int height) {
+    for (int i = 0; i < width * height; ++i) {
+        res[i] = a[i] - b[i];
+    }
+}
+
+void mat_hadamard_no_overwrite(float*a, float* b, float* res, int width, int height) {
+    for (int i = 0; i < width * height; ++i) {
+        res[i] += a[i] * b[i];
+    }
+}
+
+void mat_div(float *a, float *b, float *res, int width, int height) {
+    for (int i = 0; i < width*height; ++i) {
+        res[i] = a[i] / b[i];
+    }
+}
+
 float* mat_transpose(float *a, int width, int height) {
     float *tmp = (float*)malloc(width * height * sizeof(float));
 
@@ -62,13 +80,18 @@ float* mat_transpose(float *a, int width, int height) {
 
 void update_variable(float *a, float *grad, int width, int height, float step_size) {
     for (int i = 0; i < width * height; i++) {
-        a[i * width + j] -= step_size * grad;
+        a[i] -= step_size * grad[i];
     }
 }
 
-// calculate the sum of a over rows and write result to b
-// sum_over_rows(float *a, float *b, int width, int height) {};
-
+// sum rows of a into b
+void sum_over_rows(float *a, float *b, int width, int height) {
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            b[j] += a[i * width + j];
+        }
+    }
+}
 
 // x_t: width: 28, height: batch_size
 // old_h_t: width: hidden_unit, height: batch_size
@@ -76,8 +99,8 @@ void update_variable(float *a, float *grad, int width, int height, float step_si
 // w_z, w_r, w_h: width: hidden_unit, height: 28
 // u_z, u_r, u_h: width: hidden_unit, height: hidden_unit
 // b_z, b_r, b_h: width: hidden_unit, height: 1
-void gru_forward(int timestep, float* Z, float H, float H_hat, 
-                float R, 
+void gru_forward(int timestep, float* Z, float* H_hat, float* H_1, 
+                float *R, 
                 int batch_size, int x_width, int hidden_unit,
                 float* x_t, float* old_h_t, float* new_h_t,
                 float* w_z, float* w_r, float* w_h,
@@ -125,10 +148,18 @@ void gru_forward(int timestep, float* Z, float H, float H_hat,
     mat_hadamard(z_t, h_hat, h_hat, hidden_unit, batch_size);
     mat_add(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
 
-    copy_array(z_t, Z, timestep * hidden_unit * batch_size, (timestep+1) * hidden_unit * batch_size);
-    copy_array(r_t, R, timestep * hidden_unit, batch_size, (timestep+1) * hidden_unit, batch_size);
-    copy_array(h_hat, H_hat, timestep * hidden_unit * batch_size, (timestep+1) * hidden_unit * batch_size);
-    copy_array(h, H, timestep * hidden_unit * batch_size, (timestep+1) * hidden_unit * batch_size);
+    for (int i = 0; i < batch_size * hidden_unit; i++) {
+        Z[timestep*hidden_unit*batch_size + i] = z_t[i];
+        R[timestep*hidden_unit*batch_size + i] = r_t[i];
+        H_hat[timestep*hidden_unit*batch_size + i] = h_hat[i];
+        H_1[timestep*hidden_unit*batch_size + i] = old_h_t[i];
+    }
+/*
+    for (int i = timestep*hidden_unit*batch_size; i < (timestep+1) *hidden_unit * batch_size; i++) {
+        std::cout << R[i] << " ";
+    }
+    std::cout << std::endl;
+*/
 
     free(tmp1);
     free(tmp2);
