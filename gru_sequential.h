@@ -183,15 +183,54 @@ float calculate_loss(int batch, float *y, float *predict) {
     return loss;
 }
 
+void update_dense_and_grad_h_t(int batch, int hidden_unit, int batch_size, int step_size, float loss,
+                                float *dense, float *grad_h_t, float *predict, float *h_t, float *y) {
+
+    float* grad_dense = (float*)calloc(hidden_unit * 1, sizeof(float));
+    float* grad_predict = (float*)calloc(batch_size * 1, sizeof(float));
+
+    // d loss / d predict
+    for (int _m = 0; _m < batch; _m++) {
+        grad_predict[_m] = predict[_m] - y[_m];
+        grad_predict[_m] *= 2 * loss / batch;
+    }
+
+    // d loss / d final_h_t
+    mat_multiplication(grad_predict, dense, grad_h_t, hidden_unit, batch_size, 1);
+
+    // d loss / d dense
+    float *h_t_T = mat_transpose(h_t, batch_size, hidden_unit);
+    mat_multiplication(h_t_T, grad_predict, grad_dense, 1, hidden_unit, batch_size);
+
+    update_variable(dense, grad_dense, hidden_unit, 1, step_size);
+
+    free(h_t_T);
+    free(grad_dense);
+    free(grad_predict);
+}
+
 void gru_backward(int vec_len, int hidden_unit, int batch_size, float step_size,
-                  float *grad_h_t, float *h_hat, float *h_t_1, float *h_t,
-                  float *x_t, float *z_t, float *r_t,
+                  float *grad_h_t, float *h_t,
+                  float *x_t, 
                   float *u_h, float *u_r, float *u_z, 
                   float *w_z, float *w_r, float *w_h, 
                   float *b_z, float *b_r, float *b_h,
-                  float *Grad_u_z, float *Grad_u_r, float *Grad_u_h) {
+                  float *Grad_u_z, float *Grad_u_r, float *Grad_u_h,
+                  float *Z, float* R, float* H_hat, float* H_1) {
     
     // reset gradients for current timestep
+    float *z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float *r_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float *h_hat = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+    float *h_t_1 = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+
+    for (int i = 0; i < batch_size * hidden_unit; i++) {
+        z_t[i] = Z[i];
+        r_t[i] = R[i];
+        h_hat[i] = H_hat[i];
+        h_t_1[i] = H_1[i];
+    }
+
     float* grad_w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
     float* grad_w_r = (float*)calloc(vec_len * hidden_unit, sizeof(float));
     float* grad_w_h = (float*)calloc(vec_len * hidden_unit, sizeof(float));
@@ -325,6 +364,28 @@ void gru_backward(int vec_len, int hidden_unit, int batch_size, float step_size,
     update_variable(b_z, grad_b_z, hidden_unit, 1, step_size);
     update_variable(b_r, grad_b_r, hidden_unit, 1, step_size);
     update_variable(b_h, grad_b_h, hidden_unit, 1, step_size);
+
+    free(z_t);
+    free(r_t);
+    free(h_hat);
+    free(h_t_1);
+
+    free(grad_w_z);
+    free(grad_w_r);
+    free(grad_w_h);
+    free(grad_u_z);
+    free(grad_u_r);
+    free(grad_u_h);
+    free(grad_b_z);
+    free(grad_b_r);
+    free(grad_b_h); 
+    free(grad_r_t);
+    free(grad_r_t_before_sigmoid);
+    free(grad_z_t);
+    free(grad_z_t_before_sigmoid);
+    free(grad_h_hat);
+    free(grad_h_hat_before_sigmoid);
+    free(grad_h_t_1);
 
 }
 

@@ -160,11 +160,6 @@ int main(int argc, char** argv) {
     float* b_r = (float*)calloc(hidden_unit, sizeof(float));
     float* b_h = (float*)calloc(hidden_unit, sizeof(float));
 
-    float *z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float *r_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float *h_hat = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float *h_t_1 = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-
     float *Z = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
     float *R = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
     float *H_hat = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
@@ -174,17 +169,9 @@ int main(int argc, char** argv) {
     float* predict = (float*)calloc(batch_size * 1, sizeof(float));
 
     float* grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_dense = (float*)calloc(hidden_unit * 1, sizeof(float));
-    float* grad_predict = (float*)calloc(batch_size * 1, sizeof(float));
-    float* Grad_w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
-    float* Grad_w_r = (float*)calloc(vec_len * hidden_unit, sizeof(float));
-    float* Grad_w_h = (float*)calloc(vec_len * hidden_unit, sizeof(float));
     float* Grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
     float* Grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
     float* Grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-    float* Grad_b_z = (float*)calloc(hidden_unit, sizeof(float));
-    float* Grad_b_r = (float*)calloc(hidden_unit, sizeof(float));
-    float* Grad_b_h = (float*)calloc(hidden_unit, sizeof(float)); 
 
     // initialize variables
     init(w_z, vec_len * hidden_unit);
@@ -219,15 +206,10 @@ int main(int argc, char** argv) {
         int batch = end_i - start_i;
 
         // reset gradients
-        memset(Grad_w_z, 0.f, vec_len * hidden_unit * sizeof(float));
-        memset(Grad_w_r, 0.f, vec_len * hidden_unit * sizeof(float));
-        memset(Grad_w_h, 0.f, vec_len * hidden_unit * sizeof(float));
+
         memset(Grad_u_z, 0.f, hidden_unit * hidden_unit * sizeof(float));
         memset(Grad_u_r, 0.f, hidden_unit * hidden_unit * sizeof(float));
         memset(Grad_u_h, 0.f, hidden_unit * hidden_unit * sizeof(float));
-        memset(Grad_b_z, 0.f, hidden_unit * sizeof(float));
-        memset(Grad_b_r, 0.f, hidden_unit * sizeof(float));
-        memset(Grad_b_h, 0.f, hidden_unit * sizeof(float));
 
         // for each time step
         for (int j = 0; j < window_size; j++) {
@@ -252,31 +234,16 @@ int main(int argc, char** argv) {
         // inference
         mat_multiplication(h_t, dense, predict, 1, batch_size, hidden_unit);
 
+        // calculate loss
         float loss = calculate_loss(batch, &y[start_i], predict);
         cout << "loss is " << loss << endl;        
 
         // reset gradients
-        memset(grad_predict, 0.f, batch_size * sizeof(float));
-        memset(grad_dense, 0.f, hidden_unit * sizeof(float));
         memset(grad_h_t, 0.f, batch_size * hidden_unit * sizeof(float));
           
-        // gru_backward
-        
-        // d loss / d predict
-        for (int _m = 0; _m < batch; _m++) {
-            grad_predict[_m] = predict[_m] - y[start_i + _m];
-            grad_predict[_m] *= 2 * loss / batch;
-        }
-
-        // d loss / d final_h_t
-        mat_multiplication(grad_predict, dense, grad_h_t, hidden_unit, batch_size, 1);
-
-        // d loss / d dense
-        float *h_t_T = mat_transpose(h_t, batch_size, hidden_unit);
-        mat_multiplication(h_t_T, grad_predict, grad_dense, 1, hidden_unit, batch_size);
-        free(h_t_T);
-
-        update_variable(dense, grad_dense, hidden_unit, 1, step_size);
+        // calculate gradients for predice, dense, and h_t
+        update_dense_and_grad_h_t(batch, hidden_unit, batch_size, step_size, loss,
+                                  dense, grad_h_t, predict, h_t, &y[start_i]);
 
         // calculate gradient for each time_step
         for (int j = window_size-1; j >= 1; j--) {
@@ -286,14 +253,6 @@ int main(int argc, char** argv) {
                 for (int _n = 0; _n < vec_len; _n++) {
                     x_t[_m * vec_len + _n] = arr_data[(start_i + _m) * n + j + _n];
                 }
-            }
-
-            // fetch z_t, r_t, h_hat, h_t_1, h_t
-            for (int i = 0; i < batch_size * hidden_unit; i++) {
-                z_t[i] = Z[j*hidden_unit*batch_size + i];
-                r_t[i] = R[j*hidden_unit*batch_size + i];
-                h_hat[i] = H_hat[j*hidden_unit*batch_size + i];
-                h_t_1[i] = H_1[j*hidden_unit*batch_size + i];
             }
 
             if (j != window_size - 1) {
@@ -306,10 +265,14 @@ int main(int argc, char** argv) {
             }
 
             gru_backward(vec_len, hidden_unit, batch_size, step_size,
-                        grad_h_t, h_hat, h_t_1, h_t,
-                        x_t, z_t, r_t,
+                        grad_h_t, h_t,
+                        x_t, 
                         u_h, u_r, u_z, w_z, w_r, w_h, 
-                        b_z, b_r, b_h, Grad_u_z, Grad_u_r, Grad_u_h);
+                        b_z, b_r, b_h, Grad_u_z, Grad_u_r, Grad_u_h,
+                        &Z[j*hidden_unit*batch_size],
+                        &R[j*hidden_unit*batch_size],
+                        &H_hat[j*hidden_unit*batch_size],
+                        &H_1[j*hidden_unit*batch_size]);
         }
 
         // update variables
