@@ -93,6 +93,45 @@ mat_tanh_kernel(float* a, int width, int height) {
         a[index] = tanh(a[index]);
 }
 
+__global__ void
+mat_sub_kernel(float* a, float* b, float* res, int width, int height) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < width * height) 
+        res[index] = a[index] - b[index];
+}
+
+__global__ void 
+mat_div_kernel(float *a, float *b, float *res, int width, int height) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < width * height) 
+        res[index] = a[index] / b[index];
+}
+
+__global__ void
+mat_transpose_kernel(float *a, float* res, int width, int height) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x; // a's index
+    int index_y = index / width;
+    int index_x = index % width;
+
+    if (index < width * height)
+        res[index_x * width + index_y] = a[index];
+}
+
+__global__ void
+update_variable_kernel(float* a, float* grad, int width, int height, float step_size) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < width * height) 
+        a[index] -= step_size * grad[index];
+}
+
+__global__ void
+sum_over_rows_kernel(float* a, float* b, int width, int height) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int index_x = index % width;
+    if (index < width * height) 
+        b[index_x] += a[index];
+}
+
 // x_t: width: 28, height: batch_size
 // old_h_t: width: hidden_unit, height: batch_size
 // new_h_t: width: hidden_unit, height: batch_size
