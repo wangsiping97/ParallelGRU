@@ -147,7 +147,6 @@ int main(int argc, char** argv) {
     float step_size = 0.00001;
 
     // allocate variables
-    float* x_t = (float*)calloc(batch_size * vec_len, sizeof(float));
     float* h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
     float* h_t_new = (float*)calloc(batch_size * hidden_unit, sizeof(float));
     float* w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
@@ -160,18 +159,8 @@ int main(int argc, char** argv) {
     float* b_r = (float*)calloc(hidden_unit, sizeof(float));
     float* b_h = (float*)calloc(hidden_unit, sizeof(float));
 
-    float *Z = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-    float *R = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-    float *H_hat = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-    float *H_1 = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-
     float* dense = (float*)calloc(hidden_unit * 1, sizeof(float));
     float* predict = (float*)calloc(batch_size * 1, sizeof(float));
-
-    float* grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* Grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-    float* Grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-    float* Grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
 
     // initialize variables
     init(w_z, vec_len * hidden_unit);
@@ -206,10 +195,16 @@ int main(int argc, char** argv) {
         int batch = end_i - start_i;
 
         // reset gradients
+        float *Z = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+        float *R = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+        float *H_hat = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+        float *H_1 = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
+        float* x_t = (float*)calloc(batch_size * vec_len, sizeof(float));
 
-        memset(Grad_u_z, 0.f, hidden_unit * hidden_unit * sizeof(float));
-        memset(Grad_u_r, 0.f, hidden_unit * hidden_unit * sizeof(float));
-        memset(Grad_u_h, 0.f, hidden_unit * hidden_unit * sizeof(float));
+        float* grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+        float* Grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+        float* Grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+        float* Grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
 
         // for each time step
         for (int j = 0; j < window_size; j++) {
@@ -282,6 +277,16 @@ int main(int argc, char** argv) {
         update_variable(u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
 
         //Print(w_r, hidden_unit, 1);
+        free(Z);
+        free(R);
+        free(H_hat);
+        free(H_1);
+        free(x_t);
+
+        free(grad_h_t);
+        free(Grad_u_z);
+        free(Grad_u_r);
+        free(Grad_u_h);
     }
 
 
