@@ -157,7 +157,7 @@ void gru_forward_kernel(int batch_size, int x_width, int hidden_unit,
 }
 
 void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_width, int hidden_unit,
-                        float* x_t, float* old_h_t, float* new_h_t,
+                        float* old_h_t, float* new_h_t,
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
@@ -250,7 +250,7 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
         // inference
         mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
 
-        // cudaMemcpy(predict, device_predict, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(predict, device_predict, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
         // if (i == 0) {
         //     for (int k = 0; k < batch_size; k++) {
         //         printf("%.3f ", predict[k]);

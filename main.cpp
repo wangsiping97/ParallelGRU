@@ -16,7 +16,7 @@ using namespace std;
 
 void print_cuda_info();
 void one_iteration_cuda(int num_data, int batch_size, int window_size, int vec_len, int hidden_unit,
-                        float* x_t, float* old_h_t, float* new_h_t,
+                        float* old_h_t, float* new_h_t,
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
     if (use_gpu) {
         print_cuda_info();
         one_iteration_cuda(num_data, batch_size, window_size, vec_len, hidden_unit,
-                            x_t, h_t, h_t_new, 
+                            h_t, h_t_new, 
                             w_z, w_r, w_h,
                             u_z, u_r, u_h,
                             b_z, b_r, b_h,
