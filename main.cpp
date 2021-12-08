@@ -306,7 +306,7 @@ int main(int argc, char** argv) {
         free(h_t_T);
 
         // calculate gradient for each time_step
-        for (int j = window_size-1; j > window_size-2; j--) {
+        for (int j = window_size-1; j >= 1; j--) {
 
             // Construct x_t
             for (int _m = 0; _m < batch; _m++) {
@@ -328,7 +328,10 @@ int main(int argc, char** argv) {
                 for (int i = 0; i < batch_size * hidden_unit; i++) {
                     h_t[i] = H_1[(j+1)*batch_size*hidden_unit];
                 }
+
+                //Print(h_t, batch_size, hidden_unit);
             }
+
 
             // reset gradients for current timestep
             memset(grad_h_t_1, 0.f, batch_size * hidden_unit * sizeof(float));
@@ -475,7 +478,7 @@ int main(int argc, char** argv) {
         update_variable(b_r, Grad_b_r, hidden_unit, 1, step_size);
         update_variable(b_h, Grad_b_h, hidden_unit, 1, step_size);
 
-        //Print(b_h, hidden_unit, 1);
+        //Print(w_r, hidden_unit, 1);
     }
 
 
