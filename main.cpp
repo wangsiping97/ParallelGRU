@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
     }
 
     // read input
-    fstream infile("data_sliding.csv");
+    fstream infile("data/data_sliding.csv");
     string line, word;
     
     vector<vector<float> > data;
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
 
     vector<float> y;
 
-    fstream label("y.csv");
+    fstream label("data/y.csv");
 
     while (label >> line) {
 
