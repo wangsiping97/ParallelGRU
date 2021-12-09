@@ -15,12 +15,12 @@ using namespace std;
 
 
 void print_cuda_info();
-void one_iteration_cuda(int num_data, int batch_size, int window_size, int vec_len, int hidden_unit,
+void one_iteration_cuda(int num_data, int batch_size, int window_size, int vec_len, int hidden_unit, float step_size, 
                         float* old_h_t, float* new_h_t,
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
-                        float* dense, float* predict, float* data, int m, int n);
+                        float* dense, float* predict, float* data, int m, int n, float* y);
 
 // return GB/s
 float toBW(int bytes, float sec) {
@@ -53,7 +53,7 @@ void init(float *weight, size_t size) {
 
 void Print(float *a, int width, int height) {
     for (int i = 0; i < width * height; i++) {
-        cout << a[i] << " ";
+        printf("%.6f ", a[i]);
     }
     cout << endl;
 }
@@ -102,10 +102,6 @@ int main(int argc, char** argv) {
         data.push_back(row);
     
     }
-
-    // read label
-    // cout << data[0][0] << endl;
-    // cout << data.size() << endl;
     
     // copy data into an array
     int m = data.size();
@@ -132,10 +128,6 @@ int main(int argc, char** argv) {
                 s.ignore();
         }
     }
-
-    // cout << y.size() << endl;
-    // cout << y[0] << endl;
-
 
     int num_data = 3000;
     int window_size = 20;
@@ -174,12 +166,12 @@ int main(int argc, char** argv) {
     // using GPU
     if (use_gpu) {
         print_cuda_info();
-        one_iteration_cuda(num_data, batch_size, window_size, vec_len, hidden_unit,
+        one_iteration_cuda(num_data, batch_size, window_size, vec_len, hidden_unit, step_size, 
                             h_t, h_t_new, 
                             w_z, w_r, w_h,
                             u_z, u_r, u_h,
                             b_z, b_r, b_h,
-                            dense, predict, arr_data, m , n);
+                            dense, predict, arr_data, m , n, &y[0]);
         return 0;
     } 
 
@@ -256,13 +248,12 @@ int main(int argc, char** argv) {
                     h_t[i] = H_1[(j+1)*batch_size*hidden_unit];
                 }
 
-                //Print(h_t, batch_size, hidden_unit);
             }
 
             gru_backward(vec_len, hidden_unit, batch_size, step_size,
                         grad_h_t, h_t,
                         x_t, 
-                        u_h, u_r, u_z, w_z, w_r, w_h, 
+                        u_z, u_r, u_h, w_z, w_r, w_h, 
                         b_z, b_r, b_h, Grad_u_z, Grad_u_r, Grad_u_h,
                         &Z[j*hidden_unit*batch_size],
                         &R[j*hidden_unit*batch_size],
@@ -271,12 +262,10 @@ int main(int argc, char** argv) {
         }
 
         // update variables
-
         update_variable(u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
         update_variable(u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
         update_variable(u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
 
-        //Print(w_r, hidden_unit, 1);
         free(Z);
         free(R);
         free(H_hat);
