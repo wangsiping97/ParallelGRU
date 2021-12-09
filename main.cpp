@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
     int batch_size = 500;
 
     int hidden_unit = 100;
-    float step_size = 0.00001;
+    float step_size = 0.01;
 
     // allocate variables
     float* h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));

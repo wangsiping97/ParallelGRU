@@ -25,13 +25,6 @@ copy_data_kernel(float* x_t, int x_height, int x_width, float* data, int m, int 
 }
 
 __global__ void
-copy_partial_data_kernel(float* dest, float* src, int timestep, int length) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x + timestep * length;
-    if (index < length) 
-        dest[index] = src[index - timestep * length];
-}
-
-__global__ void
 mat_init_zeros_kernel(float* a, int size) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index < size) {
@@ -137,10 +130,13 @@ update_variable_kernel(float* a, float* grad, int width, int height, float step_
 
 __global__ void
 sum_over_rows_kernel(float* a, float* b, int width, int height) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int index_x = index % width;
-    if (index < width * height) 
-        b[index_x] += a[index];
+    int index = blockIdx.x * blockDim.x + threadIdx.x; // b's index
+    if (index < width) {
+        b[index] = 0;
+        for (int i = 0; i < height; ++i) {
+            b[index] += a[i * width + index];
+        }
+    }
 }
 
 __global__ void
@@ -168,7 +164,7 @@ void Print_Device(float* device_data, int length) {
     float* test = (float*)calloc(length, sizeof(float));
     cudaMemcpy(test, device_data, length * sizeof(float), cudaMemcpyDeviceToHost);
     for (int k = 0; k < length; ++k) {
-        printf("%.6f ", test[k]);
+        printf("%.12f ", test[k]);
     }
     printf("\n");
 }
@@ -264,14 +260,14 @@ void gru_forward_kernel(int timestep, float* Z, float* H_hat, float* H_1, float*
     mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
 
     // update Z, R, H_hat, H_1
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(Z, z_t, timestep, hidden_unit * batch_size);
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(R, r_t, timestep, hidden_unit * batch_size);
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(H_hat, h_hat, timestep, hidden_unit * batch_size);
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(H_1, old_h_t, timestep, hidden_unit * batch_size);
+    mat_copy_kernel<<<blocks, threadsPerBlock>>>(Z, z_t, hidden_unit * batch_size);
+    mat_copy_kernel<<<blocks, threadsPerBlock>>>(R, r_t, hidden_unit * batch_size);
+    mat_copy_kernel<<<blocks, threadsPerBlock>>>(H_hat, h_hat, hidden_unit * batch_size);
+    mat_copy_kernel<<<blocks, threadsPerBlock>>>(H_1, old_h_t, hidden_unit * batch_size);
 
 }
 
-void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float step_size,
+void gru_backward_kernel(int i, int vec_len, int hidden_unit, int batch_size, float step_size,
                         float* grad_h_t, float* h_t, float* x_t, 
                         float* u_z, float* u_r, float* u_h,
                         float* w_z, float* w_r, float* w_h,
@@ -285,8 +281,6 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
                         float* grad_h_hat, float* grad_h_hat_before_sigmoid,
                         float* grad_h_t_1,
                         float* Z, float* R, float* H_hat, float* H_1) {
-
-    // Print(H_hat, hidden_unit);
     
     // for current timestep:
     // d loss / d z_t
@@ -323,7 +317,8 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
     mat_multiplication_kernel<<<block_u, threadsPerBlock>>>(tmp3, grad_h_hat_before_sigmoid, grad_u_h, hidden_unit, hidden_unit, batch_size);
 
     // d loss / b_h
-    sum_over_rows_kernel<<<block_h_b, threadsPerBlock>>>(grad_h_hat_before_sigmoid, grad_b_h, hidden_unit, batch_size);
+    int block_b = computeBlocks(hidden_unit);
+    sum_over_rows_kernel<<<block_b, threadsPerBlock>>>(grad_h_hat_before_sigmoid, grad_b_h, hidden_unit, batch_size);
 
     // d loss / r_t
     float* tmp4;
@@ -348,13 +343,15 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
     mat_multiplication_kernel<<<block_u, threadsPerBlock>>>(tmp3, grad_r_t_before_sigmoid, grad_u_r, hidden_unit, hidden_unit, batch_size);
 
     // d loss / d b_r
-    sum_over_rows_kernel<<<block_h_b, threadsPerBlock>>>(grad_r_t_before_sigmoid, grad_b_r, hidden_unit, batch_size);
+    sum_over_rows_kernel<<<block_b, threadsPerBlock>>>(grad_r_t_before_sigmoid, grad_b_r, hidden_unit, batch_size);
 
     // d loss / d h_t
-    mat_transpose_kernel<<<block_h_b, threadsPerBlock>>>(u_r, tmp4, hidden_unit, batch_size);
+    mat_transpose_kernel<<<block_u, threadsPerBlock>>>(u_r, tmp4, hidden_unit, hidden_unit);
     mat_multiplication_kernel<<<block_h_b, threadsPerBlock>>>(grad_r_t_before_sigmoid, tmp4, tmp1, hidden_unit, batch_size, hidden_unit);
+    // if (i == 0) Print_Device(grad_r_t_before_sigmoid, hidden_unit * batch_size);
 
     mat_add_kernel<<<block_h_b, threadsPerBlock>>>(grad_h_t_1, tmp1, grad_h_t_1, hidden_unit, batch_size);
+    // if(i == 0) Print_Device(grad_h_t_1, hidden_unit * batch_size);
 
     // d loss / d z_t_before_sigmoid
     mat_one_sub_kernel<<<block_h_b, threadsPerBlock>>>(grad_z_t, tmp1, hidden_unit, batch_size);
@@ -367,7 +364,7 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
     mat_multiplication_kernel<<<block_u, threadsPerBlock>>>(tmp3, grad_z_t_before_sigmoid, grad_u_z, hidden_unit, hidden_unit, batch_size);
 
     // d loss / d b_z
-    sum_over_rows_kernel<<<block_h_b, threadsPerBlock>>>(grad_z_t_before_sigmoid, grad_b_z, hidden_unit, batch_size);
+    sum_over_rows_kernel<<<block_b, threadsPerBlock>>>(grad_z_t_before_sigmoid, grad_b_z, hidden_unit, batch_size);
 
     // d loss / d h_t
     mat_transpose_kernel<<<block_u, threadsPerBlock>>>(u_z, tmp4, hidden_unit, hidden_unit);
@@ -375,7 +372,7 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
     mat_add_kernel<<<block_h_b, threadsPerBlock>>>(grad_h_t_1, tmp1, grad_h_t_1, hidden_unit, batch_size);
 
     // loss for next timestep
-    mat_copy_kernel<<<block_h_b, threadsPerBlock>>>(grad_h_t, grad_h_t_1, batch_size * hidden_unit);
+    mat_copy_kernel<<<block_h_b, threadsPerBlock>>>(grad_h_t_1, grad_h_t, batch_size * hidden_unit);
 
     // cumulate gradient for all timesteps
     update_variable_kernel<<<block_w, threadsPerBlock>>>(w_z, grad_w_z, hidden_unit, vec_len, step_size);
@@ -386,7 +383,6 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
     mat_add_kernel<<<block_u, threadsPerBlock>>>(Grad_u_r, grad_u_r, Grad_u_r, hidden_unit, hidden_unit);
     mat_add_kernel<<<block_u, threadsPerBlock>>>(Grad_u_h, grad_u_h, Grad_u_h, hidden_unit, hidden_unit);
 
-    int block_b = computeBlocks(hidden_unit);
     update_variable_kernel<<<block_b, threadsPerBlock>>>(b_z, grad_b_z, hidden_unit, 1, step_size);
     update_variable_kernel<<<block_b, threadsPerBlock>>>(b_r, grad_b_r, hidden_unit, 1, step_size);
     update_variable_kernel<<<block_b, threadsPerBlock>>>(b_h, grad_b_h, hidden_unit, 1, step_size);
@@ -541,7 +537,8 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                 copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
 
                 // one forward iteration: 
-                gru_forward_kernel(j, Z, H_hat, H_1, R, 
+                gru_forward_kernel(j, &Z[j*hidden_unit*batch_size], &H_hat[j*hidden_unit*batch_size], 
+                    &H_1[j*hidden_unit*batch_size], &R[j*hidden_unit*batch_size], 
                     batch_size, x_width, hidden_unit, device_x_t, device_old_h_t, device_new_h_t, 
                     device_w_z, device_w_r, device_w_h, device_u_z, device_u_r, device_u_h, device_b_z, device_b_r, device_b_h); 
 
@@ -550,8 +547,6 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                 mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(device_new_h_t, batch_size * hidden_unit);
 
             }
-
-            // if (i == 0) Print_Device(Z, window_size * batch_size * hidden_unit);
 
             // inference
             mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
@@ -570,9 +565,9 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
             // calculate gradients for predice, dense, and h_t
             update_dense_and_grad_h_t_kernel(start_i, batch, hidden_unit, batch_size, step_size, loss,
                                             device_dense, grad_h_t, device_predict, device_old_h_t, &device_y[start_i]);
-            
-            float* test_grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-            cudaMemcpy(test_grad_h_t, grad_h_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
+
+            // if (i == 0) Print_Device(Z, window_size * batch_size * hidden_unit);
+
             
             // calculate gradient for each time_step
             double backwardTimeStart = CycleTimer::currentSeconds();
@@ -585,24 +580,25 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                     update_old_h_t_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, H_1, j, batch_size, hidden_unit);
                 }
 
+                // if (i == 0) Print_Device(&H_hat[j*hidden_unit*batch_size], batch_size * hidden_unit);
                 // call gru_backward
-            //     gru_backward_kernel(x_width, hidden_unit, batch_size, step_size,
-            //                         grad_h_t, device_old_h_t, device_x_t, 
-            //                         device_u_z, device_u_r, device_u_h,
-            //                         device_w_z, device_w_r, device_w_h,
-            //                         device_b_z, device_b_r, device_b_h, 
-            //                         Grad_u_z, Grad_u_r, Grad_u_h, 
-            //                         grad_u_z, grad_u_r, grad_u_h,
-            //                         grad_w_z, grad_w_r, grad_w_h,
-            //                         grad_b_z, grad_b_r, grad_b_h,
-            //                         grad_r_t, grad_r_t_before_sigmoid,
-            //                         grad_z_t, grad_z_t_before_sigmoid,
-            //                         grad_h_hat, grad_h_hat_before_sigmoid,
-            //                         grad_h_t_1,
-            //                         &Z[j*hidden_unit*batch_size],
-            //                         &R[j*hidden_unit*batch_size],
-            //                         &H_hat[j*hidden_unit*batch_size],
-            //                         &H_1[j*hidden_unit*batch_size]);
+                gru_backward_kernel(i, x_width, hidden_unit, batch_size, step_size,
+                                    grad_h_t, device_old_h_t, device_x_t, 
+                                    device_u_z, device_u_r, device_u_h,
+                                    device_w_z, device_w_r, device_w_h,
+                                    device_b_z, device_b_r, device_b_h, 
+                                    Grad_u_z, Grad_u_r, Grad_u_h, 
+                                    grad_u_z, grad_u_r, grad_u_h,
+                                    grad_w_z, grad_w_r, grad_w_h,
+                                    grad_b_z, grad_b_r, grad_b_h,
+                                    grad_r_t, grad_r_t_before_sigmoid,
+                                    grad_z_t, grad_z_t_before_sigmoid,
+                                    grad_h_hat, grad_h_hat_before_sigmoid,
+                                    grad_h_t_1,
+                                    &Z[j*hidden_unit*batch_size],
+                                    &R[j*hidden_unit*batch_size],
+                                    &H_hat[j*hidden_unit*batch_size],
+                                    &H_1[j*hidden_unit*batch_size]);
             }
             double backwardTimeEnd = CycleTimer::currentSeconds();
             backwardTime += backwardTimeEnd - backwardTimeStart;
