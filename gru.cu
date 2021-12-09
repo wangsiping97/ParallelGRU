@@ -511,10 +511,10 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
 
     double backwardTime = 0;
     double iterStartTime = CycleTimer::currentSeconds();
-    // One iteration, loop through all data point
 
     for (int num_iter = 0; num_iter < iter; num_iter++) {
         printf("begin iter %d\n", num_iter);
+        // One iteration, loop through all data point
         for (int i = 0; i < num_data; i += batch_size) {
 
             // batch_size * (num_data * x_width)
