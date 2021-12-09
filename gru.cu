@@ -163,6 +163,16 @@ int computeBlocks(int length) {
     return (length + threadsPerBlock - 1) / threadsPerBlock;
 }
 
+void Print_Device(float* device_data, int length) {
+    printf("Print...\n");
+    float* test = (float*)calloc(length, sizeof(float));
+    cudaMemcpy(test, device_data, length * sizeof(float), cudaMemcpyDeviceToHost);
+    for (int k = 0; k < length; ++k) {
+        printf("%.6f ", test[k]);
+    }
+    printf("\n");
+}
+
 void update_dense_and_grad_h_t_kernel(int start_i, int batch, int hidden_unit, int batch_size, int step_size, float loss,
                                     float* dense, float* grad_h_t, float* predict, float* h_t, float* device_y) {
     
@@ -275,6 +285,8 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
                         float* grad_h_hat, float* grad_h_hat_before_sigmoid,
                         float* grad_h_t_1,
                         float* Z, float* R, float* H_hat, float* H_1) {
+
+    // Print(H_hat, hidden_unit);
     
     // for current timestep:
     // d loss / d z_t
@@ -539,6 +551,8 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
 
             }
 
+            // if (i == 0) Print_Device(Z, window_size * batch_size * hidden_unit);
+
             // inference
             mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
 
@@ -572,33 +586,33 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                 }
 
                 // call gru_backward
-                gru_backward_kernel(x_width, hidden_unit, batch_size, step_size,
-                                    grad_h_t, device_old_h_t, device_x_t, 
-                                    device_u_z, device_u_r, device_u_h,
-                                    device_w_z, device_w_r, device_w_h,
-                                    device_b_z, device_b_r, device_b_h, 
-                                    Grad_u_z, Grad_u_r, Grad_u_h, 
-                                    grad_u_z, grad_u_r, grad_u_h,
-                                    grad_w_z, grad_w_r, grad_w_h,
-                                    grad_b_z, grad_b_r, grad_b_h,
-                                    grad_r_t, grad_r_t_before_sigmoid,
-                                    grad_z_t, grad_z_t_before_sigmoid,
-                                    grad_h_hat, grad_h_hat_before_sigmoid,
-                                    grad_h_t_1,
-                                    &Z[j*hidden_unit*batch_size],
-                                    &R[j*hidden_unit*batch_size],
-                                    &H_hat[j*hidden_unit*batch_size],
-                                    &H_1[j*hidden_unit*batch_size]);
+            //     gru_backward_kernel(x_width, hidden_unit, batch_size, step_size,
+            //                         grad_h_t, device_old_h_t, device_x_t, 
+            //                         device_u_z, device_u_r, device_u_h,
+            //                         device_w_z, device_w_r, device_w_h,
+            //                         device_b_z, device_b_r, device_b_h, 
+            //                         Grad_u_z, Grad_u_r, Grad_u_h, 
+            //                         grad_u_z, grad_u_r, grad_u_h,
+            //                         grad_w_z, grad_w_r, grad_w_h,
+            //                         grad_b_z, grad_b_r, grad_b_h,
+            //                         grad_r_t, grad_r_t_before_sigmoid,
+            //                         grad_z_t, grad_z_t_before_sigmoid,
+            //                         grad_h_hat, grad_h_hat_before_sigmoid,
+            //                         grad_h_t_1,
+            //                         &Z[j*hidden_unit*batch_size],
+            //                         &R[j*hidden_unit*batch_size],
+            //                         &H_hat[j*hidden_unit*batch_size],
+            //                         &H_1[j*hidden_unit*batch_size]);
             }
             double backwardTimeEnd = CycleTimer::currentSeconds();
             backwardTime += backwardTimeEnd - backwardTimeStart;
 
 
-            // update variables
-            int update_block = computeBlocks(hidden_unit * hidden_unit);
-            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
-            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
-            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
+            // // update variables
+            // int update_block = computeBlocks(hidden_unit * hidden_unit);
+            // update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
+            // update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
+            // update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
 
         }
     }

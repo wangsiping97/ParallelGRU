@@ -92,6 +92,12 @@ void sum_over_rows(float *a, float *b, int width, int height) {
     }
 }
 
+void Print(float* data, int length) {
+    for (int i = 0; i < length; ++i) 
+        printf("%.6f ", data[i]);
+    printf("\n");
+}
+
 // x_t: width: 28, height: batch_size
 // old_h_t: width: hidden_unit, height: batch_size
 // new_h_t: width: hidden_unit, height: batch_size
@@ -431,6 +437,8 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
                 memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
                 memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
             }
+
+            // if (i == 0) Print(Z, window_size * batch_size * hidden_unit);
 
             // inference
             mat_multiplication(h_t, dense, predict, 1, batch_size, hidden_unit);
