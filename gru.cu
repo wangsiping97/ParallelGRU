@@ -552,8 +552,6 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
             mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
 
             cudaMemcpy(predict, device_predict, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
-            // Print(predict, batch_size, 1);
-            
             
             // calculate loss
             float loss = calculate_loss(batch, &y[start_i], predict);
@@ -565,9 +563,6 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
             // calculate gradients for predice, dense, and h_t
             update_dense_and_grad_h_t_kernel(start_i, batch, hidden_unit, batch_size, step_size, loss,
                                             device_dense, grad_h_t, device_predict, device_old_h_t, &device_y[start_i]);
-
-            // if (i == 0) Print_Device(Z, window_size * batch_size * hidden_unit);
-
             
             // calculate gradient for each time_step
             double backwardTimeStart = CycleTimer::currentSeconds();
@@ -580,7 +575,6 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                     update_old_h_t_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, H_1, j, batch_size, hidden_unit);
                 }
 
-                // if (i == 0) Print_Device(&H_hat[j*hidden_unit*batch_size], batch_size * hidden_unit);
                 // call gru_backward
                 gru_backward_kernel(i, x_width, hidden_unit, batch_size, step_size,
                                     grad_h_t, device_old_h_t, device_x_t, 
@@ -603,12 +597,11 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
             double backwardTimeEnd = CycleTimer::currentSeconds();
             backwardTime += backwardTimeEnd - backwardTimeStart;
 
-
             // // update variables
-            // int update_block = computeBlocks(hidden_unit * hidden_unit);
-            // update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
-            // update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
-            // update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
+            int update_block = computeBlocks(hidden_unit * hidden_unit);
+            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
+            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
+            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
 
         }
     }

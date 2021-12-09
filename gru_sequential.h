@@ -216,8 +216,6 @@ void gru_backward(int i_start, int vec_len, int hidden_unit, int batch_size, flo
                   float *b_z, float *b_r, float *b_h,
                   float *Grad_u_z, float *Grad_u_r, float *Grad_u_h,
                   float *Z, float* R, float* H_hat, float* H_1) {
-
-    // if(i == 0) Print(Z, hidden_unit*batch_size);
     
     // reset gradients for current timestep
     float *z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
