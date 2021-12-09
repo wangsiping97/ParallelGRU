@@ -2,25 +2,23 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
-#include <cmath>
 #include <cstring>
 #include <stdio.h>
 #include <cstdlib>
 #include <stdio.h>
 #include <getopt.h>
 #include "gru_sequential.h"
-#include "CycleTimer.h"
 
 using namespace std;
 
 
 void print_cuda_info();
-void one_iteration_cuda(int num_data, int batch_size, int window_size, int vec_len, int hidden_unit, float step_size, 
+void run_model_cuda(int num_data, int batch_size, int window_size, int vec_len, int hidden_unit, float step_size, 
                         float* old_h_t, float* new_h_t,
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
-                        float* dense, float* predict, float* data, int m, int n, float* y);
+                        float* dense, float* predict, float* data, int m, int n, float* y, int iter);
 
 // return GB/s
 float toBW(int bytes, float sec) {
@@ -62,17 +60,22 @@ int main(int argc, char** argv) {
     // parse commandline options ////////////////////////////////////////////
     int opt;
     static struct option long_options[] = {
+        {"iter", 1, 0, 'i'},
         {"gpu",  1, 0, 'g'},
         {"help", 0, 0, '?'},
         {0 ,0, 0, 0}
     };
 
     bool use_gpu = false;
+    int iter = 1;
 
-    while ((opt = getopt_long(argc, argv, "g:?", long_options, NULL)) != EOF) {
+    while ((opt = getopt_long(argc, argv, "i:g:?", long_options, NULL)) != EOF) {
         switch (opt) {
         case 'g':
             use_gpu = (bool)(atoi(optarg));
+            break;
+        case 'i':
+            iter = atoi(optarg);
             break;
         case '?':
         default:
@@ -166,120 +169,25 @@ int main(int argc, char** argv) {
     // using GPU
     if (use_gpu) {
         print_cuda_info();
-        one_iteration_cuda(num_data, batch_size, window_size, vec_len, hidden_unit, step_size, 
+        run_model_cuda(num_data, batch_size, window_size, vec_len, hidden_unit, step_size, 
                             h_t, h_t_new, 
                             w_z, w_r, w_h,
                             u_z, u_r, u_h,
                             b_z, b_r, b_h,
-                            dense, predict, arr_data, m , n, &y[0]);
+                            dense, predict, arr_data, m , n, &y[0], iter);
         return 0;
     } 
 
     // using CPU
-    cout << "Using CPU..." << endl;
-    double startTime = CycleTimer::currentSeconds();
-    // One iteration, loop through all data point
-    for (int i = 0; i < num_data; i += batch_size) {
-
-        // batch_size * (num_data * vec_len)
-        int start_i = i;
-        int end_i = min(num_data, i + batch_size);
-        int batch = end_i - start_i;
-
-        // reset gradients
-        float *Z = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-        float *R = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-        float *H_hat = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-        float *H_1 = (float*)calloc(window_size * batch_size * hidden_unit, sizeof(float));
-        float* x_t = (float*)calloc(batch_size * vec_len, sizeof(float));
-
-        float* grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-        float* Grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-        float* Grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-        float* Grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-
-        // for each time step
-        for (int j = 0; j < window_size; j++) {
-
-            // Construct x_t
-            for (int _m = 0; _m < batch; _m++) {
-                for (int _n = 0; _n < vec_len; _n++) {
-                    x_t[_m * vec_len + _n] = arr_data[(start_i + _m) * n + j + _n];
-                }
-            }
-
-            // one forward iteration: 
-            gru_forward(j, Z, H_hat, H_1, R, 
-                batch_size, vec_len, hidden_unit, x_t, h_t, h_t_new, 
-                w_z, w_r, w_h, u_z, u_r, u_h, b_z, b_r, b_h); 
-
-            // update h_t for next round
-            memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
-            memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
-        }
-
-        // inference
-        mat_multiplication(h_t, dense, predict, 1, batch_size, hidden_unit);
-
-        // calculate loss
-        float loss = calculate_loss(batch, &y[start_i], predict);
-        cout << "loss is " << loss << endl;        
-
-        // reset gradients
-        memset(grad_h_t, 0.f, batch_size * hidden_unit * sizeof(float));
-          
-        // calculate gradients for predice, dense, and h_t
-        update_dense_and_grad_h_t(batch, hidden_unit, batch_size, step_size, loss,
-                                  dense, grad_h_t, predict, h_t, &y[start_i]);
-
-        // calculate gradient for each time_step
-        for (int j = window_size-1; j >= 1; j--) {
-
-            // Construct x_t
-            for (int _m = 0; _m < batch; _m++) {
-                for (int _n = 0; _n < vec_len; _n++) {
-                    x_t[_m * vec_len + _n] = arr_data[(start_i + _m) * n + j + _n];
-                }
-            }
-
-            if (j != window_size - 1) {
-
-                for (int i = 0; i < batch_size * hidden_unit; i++) {
-                    h_t[i] = H_1[(j+1)*batch_size*hidden_unit];
-                }
-
-            }
-
-            gru_backward(vec_len, hidden_unit, batch_size, step_size,
-                        grad_h_t, h_t,
-                        x_t, 
-                        u_z, u_r, u_h, w_z, w_r, w_h, 
-                        b_z, b_r, b_h, Grad_u_z, Grad_u_r, Grad_u_h,
-                        &Z[j*hidden_unit*batch_size],
-                        &R[j*hidden_unit*batch_size],
-                        &H_hat[j*hidden_unit*batch_size],
-                        &H_1[j*hidden_unit*batch_size]);
-        }
-
-        // update variables
-        update_variable(u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
-        update_variable(u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
-        update_variable(u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
-
-        free(Z);
-        free(R);
-        free(H_hat);
-        free(H_1);
-        free(x_t);
-
-        free(grad_h_t);
-        free(Grad_u_z);
-        free(Grad_u_r);
-        free(Grad_u_h);
+    else {
+        cout << "Using CPU..." << endl;
+        run_model(num_data, batch_size, window_size, vec_len, hidden_unit, step_size,
+                        h_t, h_t_new,
+                        w_z, w_r, w_h,
+                        u_z, u_r, u_h,
+                        b_z, b_r, b_h,
+                        dense, predict, arr_data, m, n, &y[0], iter);
+        return 0;
     }
-
-
-    double endTime = CycleTimer::currentSeconds();
-    printf("CPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
 
 }

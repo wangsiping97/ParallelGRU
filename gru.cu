@@ -163,6 +163,104 @@ int computeBlocks(int length) {
     return (length + threadsPerBlock - 1) / threadsPerBlock;
 }
 
+void update_dense_and_grad_h_t_kernel(int start_i, int batch, int hidden_unit, int batch_size, int step_size, float loss,
+                                    float* dense, float* grad_h_t, float* predict, float* h_t, float* device_y) {
+    
+    float* grad_dense;
+    float* grad_predict;
+
+    cudaMalloc((void **)&grad_dense, hidden_unit * 1 * sizeof(float));
+    cudaMalloc((void **)&grad_predict, batch_size * 1 * sizeof(float));
+
+    // d loss / d predict
+    update_grad_predict_kernel<<<computeBlocks(batch), threadsPerBlock>>>(predict, device_y, grad_predict, loss, batch);
+
+    // d loss / d final_h_t
+    mat_multiplication_kernel<<<computeBlocks(hidden_unit * batch_size), threadsPerBlock>>>(grad_predict, dense, grad_h_t, hidden_unit, batch_size, 1);
+
+    // d loss / d dense
+    float* h_t_T;
+    cudaMalloc((void **)&h_t_T, batch_size * hidden_unit * sizeof(float));
+    mat_transpose_kernel<<<computeBlocks(hidden_unit * batch_size), threadsPerBlock>>>(h_t, h_t_T, batch_size, hidden_unit);
+    mat_multiplication_kernel<<<computeBlocks(1 * hidden_unit), threadsPerBlock>>>(h_t_T, grad_predict, grad_dense, 1, hidden_unit, batch_size);
+
+    update_variable_kernel<<<computeBlocks(hidden_unit * 1), threadsPerBlock>>>(dense, grad_dense, hidden_unit, 1, step_size);
+
+    cudaFree(h_t_T);
+    cudaFree(grad_dense);
+    cudaFree(grad_predict);
+
+}
+
+// x_t: width: 28, height: batch_size
+// old_h_t: width: hidden_unit, height: batch_size
+// new_h_t: width: hidden_unit, height: batch_size
+// w_z, w_r, w_h: width: hidden_unit, height: 28
+// u_z, u_r, u_h: width: hidden_unit, height: hidden_unit
+// b_z, b_r, b_h: width: hidden_unit, height: 1
+void gru_forward_kernel(int timestep, float* Z, float* H_hat, float* H_1, float* R, 
+                int batch_size, int x_width, int hidden_unit,
+                float* x_t, float* old_h_t, float* new_h_t,
+                float* w_z, float* w_r, float* w_h,
+                float* u_z, float* u_r, float* u_h,
+                float* b_z, float* b_r, float* b_h) {
+
+    const int blocks = (hidden_unit * batch_size + threadsPerBlock - 1) / threadsPerBlock;
+
+    float* tmp1;
+    float* tmp2;
+    cudaMalloc((void **)&tmp1, hidden_unit * batch_size * sizeof(float));
+    cudaMalloc((void **)&tmp2, hidden_unit * batch_size * sizeof(float));
+
+    // z_t = sigmoid(x_t * w_z + old_h_t * u_z + b_z)
+    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(x_t, w_z, tmp1, hidden_unit, batch_size, x_width);
+    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(old_h_t, u_z, tmp2, hidden_unit, batch_size, hidden_unit);
+
+    float* z_t;
+    cudaMalloc((void **)&z_t, hidden_unit * batch_size * sizeof(float));
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, z_t, hidden_unit, batch_size); 
+    mat_add_b_kernel<<<blocks, threadsPerBlock>>>(z_t, b_z, z_t, hidden_unit, batch_size);
+    mat_sigmoid_kernel<<<blocks, threadsPerBlock>>>(z_t, hidden_unit, batch_size);
+
+    // r_t = sigmoid(x_t * w_r + old_h_t * u_r + b_r)
+    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(x_t, w_r, tmp1, hidden_unit, batch_size, x_width);
+    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(old_h_t, u_r, tmp2, hidden_unit, batch_size, hidden_unit);
+    
+    float* r_t;
+    cudaMalloc((void **)&r_t, hidden_unit * batch_size * sizeof(float));
+
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, r_t, hidden_unit, batch_size); 
+    mat_add_b_kernel<<<blocks, threadsPerBlock>>>(r_t, b_r, r_t, hidden_unit, batch_size);
+    mat_sigmoid_kernel<<<blocks, threadsPerBlock>>>(r_t, hidden_unit, batch_size);
+
+    // h_hat = phi(x_t * w_h + (r_t . old_h_t) * u_h + b_h)
+    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(x_t, w_h, tmp1, hidden_unit, batch_size, x_width);
+    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(r_t, old_h_t, r_t, hidden_unit, batch_size);
+    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(r_t, u_h, tmp2, hidden_unit, batch_size, hidden_unit);
+
+    float* h_hat;
+    cudaMalloc((void **)&h_hat, hidden_unit * batch_size * sizeof(float));
+
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, h_hat, hidden_unit, batch_size); 
+    mat_add_b_kernel<<<blocks, threadsPerBlock>>>(h_hat, b_h, h_hat, hidden_unit, batch_size);
+    mat_tanh_kernel<<<blocks, threadsPerBlock>>>(h_hat, hidden_unit, batch_size);
+
+    // new_h_t = (1-z_t).old_h_t + z_t.h_hat
+    float* tmp3;
+    cudaMalloc((void **)&tmp3, hidden_unit * batch_size * sizeof(float));
+    mat_one_sub_kernel<<<blocks, threadsPerBlock>>>(z_t, tmp3, hidden_unit, batch_size);
+    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(tmp3, old_h_t, tmp3, hidden_unit, batch_size);
+    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(z_t, h_hat, h_hat, hidden_unit, batch_size);
+    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
+
+    // update Z, R, H_hat, H_1
+    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(Z, z_t, timestep, hidden_unit * batch_size);
+    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(R, r_t, timestep, hidden_unit * batch_size);
+    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(H_hat, h_hat, timestep, hidden_unit * batch_size);
+    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(H_1, old_h_t, timestep, hidden_unit * batch_size);
+
+}
+
 void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float step_size,
                         float* grad_h_t, float* h_t, float* x_t, 
                         float* u_z, float* u_r, float* u_h,
@@ -287,110 +385,12 @@ void gru_backward_kernel(int vec_len, int hidden_unit, int batch_size, float ste
     cudaFree(tmp4);
 }
 
-void update_dense_and_grad_h_t_kernel(int start_i, int batch, int hidden_unit, int batch_size, int step_size, float loss,
-                                    float* dense, float* grad_h_t, float* predict, float* h_t, float* device_y) {
-    
-    float* grad_dense;
-    float* grad_predict;
-
-    cudaMalloc((void **)&grad_dense, hidden_unit * 1 * sizeof(float));
-    cudaMalloc((void **)&grad_predict, batch_size * 1 * sizeof(float));
-
-    // d loss / d predict
-    update_grad_predict_kernel<<<computeBlocks(batch), threadsPerBlock>>>(predict, device_y, grad_predict, loss, batch);
-
-    // d loss / d final_h_t
-    mat_multiplication_kernel<<<computeBlocks(hidden_unit * batch_size), threadsPerBlock>>>(grad_predict, dense, grad_h_t, hidden_unit, batch_size, 1);
-
-    // d loss / d dense
-    float* h_t_T;
-    cudaMalloc((void **)&h_t_T, batch_size * hidden_unit * sizeof(float));
-    mat_transpose_kernel<<<computeBlocks(hidden_unit * batch_size), threadsPerBlock>>>(h_t, h_t_T, batch_size, hidden_unit);
-    mat_multiplication_kernel<<<computeBlocks(1 * hidden_unit), threadsPerBlock>>>(h_t_T, grad_predict, grad_dense, 1, hidden_unit, batch_size);
-
-    update_variable_kernel<<<computeBlocks(hidden_unit * 1), threadsPerBlock>>>(dense, grad_dense, hidden_unit, 1, step_size);
-
-    cudaFree(h_t_T);
-    cudaFree(grad_dense);
-    cudaFree(grad_predict);
-
-}
-
-// x_t: width: 28, height: batch_size
-// old_h_t: width: hidden_unit, height: batch_size
-// new_h_t: width: hidden_unit, height: batch_size
-// w_z, w_r, w_h: width: hidden_unit, height: 28
-// u_z, u_r, u_h: width: hidden_unit, height: hidden_unit
-// b_z, b_r, b_h: width: hidden_unit, height: 1
-void gru_forward_kernel(int timestep, float* Z, float* H_hat, float* H_1, float* R, 
-                int batch_size, int x_width, int hidden_unit,
-                float* x_t, float* old_h_t, float* new_h_t,
-                float* w_z, float* w_r, float* w_h,
-                float* u_z, float* u_r, float* u_h,
-                float* b_z, float* b_r, float* b_h) {
-
-    const int blocks = (hidden_unit * batch_size + threadsPerBlock - 1) / threadsPerBlock;
-
-    float* tmp1;
-    float* tmp2;
-    cudaMalloc((void **)&tmp1, hidden_unit * batch_size * sizeof(float));
-    cudaMalloc((void **)&tmp2, hidden_unit * batch_size * sizeof(float));
-
-    // z_t = sigmoid(x_t * w_z + old_h_t * u_z + b_z)
-    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(x_t, w_z, tmp1, hidden_unit, batch_size, x_width);
-    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(old_h_t, u_z, tmp2, hidden_unit, batch_size, hidden_unit);
-
-    float* z_t;
-    cudaMalloc((void **)&z_t, hidden_unit * batch_size * sizeof(float));
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, z_t, hidden_unit, batch_size); 
-    mat_add_b_kernel<<<blocks, threadsPerBlock>>>(z_t, b_z, z_t, hidden_unit, batch_size);
-    mat_sigmoid_kernel<<<blocks, threadsPerBlock>>>(z_t, hidden_unit, batch_size);
-
-    // r_t = sigmoid(x_t * w_r + old_h_t * u_r + b_r)
-    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(x_t, w_r, tmp1, hidden_unit, batch_size, x_width);
-    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(old_h_t, u_r, tmp2, hidden_unit, batch_size, hidden_unit);
-    
-    float* r_t;
-    cudaMalloc((void **)&r_t, hidden_unit * batch_size * sizeof(float));
-
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, r_t, hidden_unit, batch_size); 
-    mat_add_b_kernel<<<blocks, threadsPerBlock>>>(r_t, b_r, r_t, hidden_unit, batch_size);
-    mat_sigmoid_kernel<<<blocks, threadsPerBlock>>>(r_t, hidden_unit, batch_size);
-
-    // h_hat = phi(x_t * w_h + (r_t . old_h_t) * u_h + b_h)
-    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(x_t, w_h, tmp1, hidden_unit, batch_size, x_width);
-    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(r_t, old_h_t, r_t, hidden_unit, batch_size);
-    mat_multiplication_kernel<<<blocks, threadsPerBlock>>>(r_t, u_h, tmp2, hidden_unit, batch_size, hidden_unit);
-
-    float* h_hat;
-    cudaMalloc((void **)&h_hat, hidden_unit * batch_size * sizeof(float));
-
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp1, tmp2, h_hat, hidden_unit, batch_size); 
-    mat_add_b_kernel<<<blocks, threadsPerBlock>>>(h_hat, b_h, h_hat, hidden_unit, batch_size);
-    mat_tanh_kernel<<<blocks, threadsPerBlock>>>(h_hat, hidden_unit, batch_size);
-
-    // new_h_t = (1-z_t).old_h_t + z_t.h_hat
-    float* tmp3;
-    cudaMalloc((void **)&tmp3, hidden_unit * batch_size * sizeof(float));
-    mat_one_sub_kernel<<<blocks, threadsPerBlock>>>(z_t, tmp3, hidden_unit, batch_size);
-    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(tmp3, old_h_t, tmp3, hidden_unit, batch_size);
-    mat_hadamard_kernel<<<blocks, threadsPerBlock>>>(z_t, h_hat, h_hat, hidden_unit, batch_size);
-    mat_add_kernel<<<blocks, threadsPerBlock>>>(tmp3, h_hat, new_h_t, hidden_unit, batch_size);
-
-    // update Z, R, H_hat, H_1
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(Z, z_t, timestep, hidden_unit * batch_size);
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(R, r_t, timestep, hidden_unit * batch_size);
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(H_hat, h_hat, timestep, hidden_unit * batch_size);
-    copy_partial_data_kernel<<<blocks, threadsPerBlock>>>(H_1, old_h_t, timestep, hidden_unit * batch_size);
-
-}
-
-void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_width, int hidden_unit, float step_size,
+void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, int hidden_unit, float step_size,
                         float* old_h_t, float* new_h_t,
                         float* w_z, float* w_r, float* w_h,
                         float* u_z, float* u_r, float* u_h,
                         float* b_z, float* b_r, float* b_h,
-                        float* dense, float* predict, float* arr_data, int m, int n, float* y) {
+                        float* dense, float* predict, float* arr_data, int m, int n, float* y, int iter) {
 
     double startTime = CycleTimer::currentSeconds();
 
@@ -512,91 +512,95 @@ void one_iteration_cuda(int num_data, int batch_size, int window_size, int x_wid
     double backwardTime = 0;
     double iterStartTime = CycleTimer::currentSeconds();
     // One iteration, loop through all data point
-    for (int i = 0; i < num_data; i += batch_size) {
 
-        // batch_size * (num_data * x_width)
-        int start_i = i;
-        int end_i = min(num_data, i + batch_size);
-        int batch = end_i - start_i;
+    for (int num_iter = 0; num_iter < iter; num_iter++) {
+        printf("begin iter %d\n", num_iter);
+        for (int i = 0; i < num_data; i += batch_size) {
 
-        // for each time step
-        
-        for (int j = 0; j < window_size; j++) {
+            // batch_size * (num_data * x_width)
+            int start_i = i;
+            int end_i = min(num_data, i + batch_size);
+            int batch = end_i - start_i;
 
-            copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
+            // for each time step
+            
+            for (int j = 0; j < window_size; j++) {
 
-            // one forward iteration: 
-            gru_forward_kernel(j, Z, H_hat, H_1, R, 
-                batch_size, x_width, hidden_unit, device_x_t, device_old_h_t, device_new_h_t, 
-                device_w_z, device_w_r, device_w_h, device_u_z, device_u_r, device_u_h, device_b_z, device_b_r, device_b_h); 
+                copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
 
-            // update h_t for the next round
-            mat_copy_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, device_new_h_t, batch_size * hidden_unit);
-            mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(device_new_h_t, batch_size * hidden_unit);
+                // one forward iteration: 
+                gru_forward_kernel(j, Z, H_hat, H_1, R, 
+                    batch_size, x_width, hidden_unit, device_x_t, device_old_h_t, device_new_h_t, 
+                    device_w_z, device_w_r, device_w_h, device_u_z, device_u_r, device_u_h, device_b_z, device_b_r, device_b_h); 
 
-        }
+                // update h_t for the next round
+                mat_copy_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, device_new_h_t, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(device_new_h_t, batch_size * hidden_unit);
 
-        // inference
-        mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
-
-        cudaMemcpy(predict, device_predict, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
-        // Print(predict, batch_size, 1);
-        
-        
-        // calculate loss
-        float loss = calculate_loss(batch, &y[start_i], predict);
-        printf("loss is %.6f\n", loss);
-
-        // reset gradients
-        mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_h_t, batch_size * hidden_unit);
-
-        // calculate gradients for predice, dense, and h_t
-        update_dense_and_grad_h_t_kernel(start_i, batch, hidden_unit, batch_size, step_size, loss,
-                                        device_dense, grad_h_t, device_predict, device_old_h_t, &device_y[start_i]);
-        
-        float* test_grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-        cudaMemcpy(test_grad_h_t, grad_h_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
-        
-        // calculate gradient for each time_step
-        double backwardTimeStart = CycleTimer::currentSeconds();
-        for (int j = window_size-1; j >= 1; j--) {
-            // Construct x_t
-            copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
-
-            // Update h_t
-            if (j != window_size - 1) {
-                update_old_h_t_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, H_1, j, batch_size, hidden_unit);
             }
 
-            // call gru_backward
-            gru_backward_kernel(x_width, hidden_unit, batch_size, step_size,
-                                grad_h_t, device_old_h_t, device_x_t, 
-                                device_u_z, device_u_r, device_u_h,
-                                device_w_z, device_w_r, device_w_h,
-                                device_b_z, device_b_r, device_b_h, 
-                                Grad_u_z, Grad_u_r, Grad_u_h, 
-                                grad_u_z, grad_u_r, grad_u_h,
-                                grad_w_z, grad_w_r, grad_w_h,
-                                grad_b_z, grad_b_r, grad_b_h,
-                                grad_r_t, grad_r_t_before_sigmoid,
-                                grad_z_t, grad_z_t_before_sigmoid,
-                                grad_h_hat, grad_h_hat_before_sigmoid,
-                                grad_h_t_1,
-                                &Z[j*hidden_unit*batch_size],
-                                &R[j*hidden_unit*batch_size],
-                                &H_hat[j*hidden_unit*batch_size],
-                                &H_1[j*hidden_unit*batch_size]);
+            // inference
+            mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
+
+            cudaMemcpy(predict, device_predict, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
+            // Print(predict, batch_size, 1);
+            
+            
+            // calculate loss
+            float loss = calculate_loss(batch, &y[start_i], predict);
+            printf("loss is %.6f\n", loss);
+
+            // reset gradients
+            mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_h_t, batch_size * hidden_unit);
+
+            // calculate gradients for predice, dense, and h_t
+            update_dense_and_grad_h_t_kernel(start_i, batch, hidden_unit, batch_size, step_size, loss,
+                                            device_dense, grad_h_t, device_predict, device_old_h_t, &device_y[start_i]);
+            
+            float* test_grad_h_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+            cudaMemcpy(test_grad_h_t, grad_h_t, batch_size * hidden_unit * sizeof(float), cudaMemcpyDeviceToHost);
+            
+            // calculate gradient for each time_step
+            double backwardTimeStart = CycleTimer::currentSeconds();
+            for (int j = window_size-1; j >= 1; j--) {
+                // Construct x_t
+                copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
+
+                // Update h_t
+                if (j != window_size - 1) {
+                    update_old_h_t_kernel<<<blocks_h, threadsPerBlock>>>(device_old_h_t, H_1, j, batch_size, hidden_unit);
+                }
+
+                // call gru_backward
+                gru_backward_kernel(x_width, hidden_unit, batch_size, step_size,
+                                    grad_h_t, device_old_h_t, device_x_t, 
+                                    device_u_z, device_u_r, device_u_h,
+                                    device_w_z, device_w_r, device_w_h,
+                                    device_b_z, device_b_r, device_b_h, 
+                                    Grad_u_z, Grad_u_r, Grad_u_h, 
+                                    grad_u_z, grad_u_r, grad_u_h,
+                                    grad_w_z, grad_w_r, grad_w_h,
+                                    grad_b_z, grad_b_r, grad_b_h,
+                                    grad_r_t, grad_r_t_before_sigmoid,
+                                    grad_z_t, grad_z_t_before_sigmoid,
+                                    grad_h_hat, grad_h_hat_before_sigmoid,
+                                    grad_h_t_1,
+                                    &Z[j*hidden_unit*batch_size],
+                                    &R[j*hidden_unit*batch_size],
+                                    &H_hat[j*hidden_unit*batch_size],
+                                    &H_1[j*hidden_unit*batch_size]);
+            }
+            double backwardTimeEnd = CycleTimer::currentSeconds();
+            backwardTime += backwardTimeEnd - backwardTimeStart;
+
+
+            // update variables
+            int update_block = computeBlocks(hidden_unit * hidden_unit);
+            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
+            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
+            update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
+
         }
-        double backwardTimeEnd = CycleTimer::currentSeconds();
-        backwardTime += backwardTimeEnd - backwardTimeStart;
-
-
-        // update variables
-        int update_block = computeBlocks(hidden_unit * hidden_unit);
-        update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
-        update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
-        update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
-
     }
 
     double iterEndTime = CycleTimer::currentSeconds();
