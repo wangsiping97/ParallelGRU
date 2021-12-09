@@ -7,8 +7,6 @@
 
 #include "CycleTimer.h"
 
-using namespace std;
-
 #define threadsPerBlock 512
 
 extern float toBW(int bytes, float sec);
@@ -517,6 +515,8 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
     const int blocks_predict = (batch_size + threadsPerBlock - 1) / threadsPerBlock;
     const int blocks_x = (x_width * batch_size + threadsPerBlock - 1) / threadsPerBlock;
 
+    double forwardTime = 0;
+    double inferenceTime = 0;
     double backwardTime = 0;
     double iterStartTime = CycleTimer::currentSeconds();
 
@@ -531,7 +531,7 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
             int batch = end_i - start_i;
 
             // for each time step
-            
+            double forwardStartTime = CycleTimer::currentSeconds();
             for (int j = 0; j < window_size; j++) {
 
                 copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
@@ -547,16 +547,22 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                 mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(device_new_h_t, batch_size * hidden_unit);
 
             }
+            double forwardEndTime = CycleTimer::currentSeconds();
+            forwardTime += forwardEndTime - forwardStartTime;
 
             // inference
+            double inferenceStartTime = CycleTimer::currentSeconds();
             mat_multiplication_kernel<<<blocks_predict, threadsPerBlock>>>(device_dense, device_old_h_t, device_predict, batch_size, 1, hidden_unit);
 
             cudaMemcpy(predict, device_predict, batch_size * sizeof(float), cudaMemcpyDeviceToHost);
             
             // calculate loss
             float loss = calculate_loss(batch, &y[start_i], predict);
-            printf("loss is %.6f\n", loss);
+            // printf("loss is %.6f\n", loss);
+            double inferenceEndTime = CycleTimer::currentSeconds();
+            inferenceTime += inferenceEndTime - inferenceStartTime;
 
+            double backwardTimeStart = CycleTimer::currentSeconds();
             // reset gradients
             mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_h_t, batch_size * hidden_unit);
 
@@ -565,7 +571,6 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                                             device_dense, grad_h_t, device_predict, device_old_h_t, &device_y[start_i]);
             
             // calculate gradient for each time_step
-            double backwardTimeStart = CycleTimer::currentSeconds();
             for (int j = window_size-1; j >= 1; j--) {
                 // Construct x_t
                 copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
@@ -652,6 +657,8 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
     double endTime = CycleTimer::currentSeconds();
     printf("GPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
     printf("GPU Compute: %.3f ms\n", 1000.f * (iterEndTime - iterStartTime));
+    printf("GPU Forward: %.3f ms\n", 1000.f * (forwardTime));
+    printf("GPU Inference: %.3f ms\n", 1000.f * (inferenceTime));
     printf("GPU Backward: %.3f ms\n", 1000.f * (backwardTime));
 }
 

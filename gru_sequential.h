@@ -4,8 +4,6 @@
 #include <cmath>
 #include "CycleTimer.h"
 
-using namespace std;
-
 void mat_multiplication(float* a, float* b, float* c, int c_width, int c_height, int a_width) {
     for (int i = 0; i < c_height; ++i) {
         for (int j = 0; j < c_width; ++j) {
@@ -392,7 +390,7 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
 
             // batch_size * (num_data * vec_len)
             int start_i = i;
-            int end_i = min(num_data, i + batch_size);
+            int end_i = std::min(num_data, i + batch_size);
             int batch = end_i - start_i;
 
             // reset gradients
@@ -432,7 +430,7 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
 
             // calculate loss
             float loss = calculate_loss(batch, &y[start_i], predict);
-            cout << "loss is " << loss << endl;        
+            // cout << "loss is " << loss << endl;        
 
             // reset gradients
             memset(grad_h_t, 0.f, batch_size * hidden_unit * sizeof(float));
