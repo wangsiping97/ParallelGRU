@@ -7,7 +7,7 @@ A parallel version of GRU (Gated Recurrent Unit) model using OpenMP and CUDA, by
 ## Usage
 
 **Note:** 
-1. The NVIDIA CUDA C?C++ Compiler (NVCC) needs to be added to `PATH`. 
+1. The NVIDIA CUDA C/C++ Compiler (NVCC) needs to be added to `PATH`. 
 2. The CUDA shared library must be loaded at runtime. 
 
 ```
