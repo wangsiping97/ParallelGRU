@@ -1,5 +1,5 @@
 # ParallelGRU
-A parallel version of GRU (Gated Recurrent Unit) model using OpenMP and CUDA, by Siping Wang and Junyan Pu. Final project for CMU 15-618. 
+A parallel version of GRU (Gated Recurrent Unit) model using CUDA, by Siping Wang and Junyan Pu. Final project for CMU 15-618. 
 
 ## Project Page
 [https://wangsiping97.github.io/15618/](https://wangsiping97.github.io/15618/)
