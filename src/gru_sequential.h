@@ -213,6 +213,13 @@ void gru_backward(int i_start, int vec_len, int hidden_unit, int batch_size, flo
                   float *w_z, float *w_r, float *w_h, 
                   float *b_z, float *b_r, float *b_h,
                   float *Grad_u_z, float *Grad_u_r, float *Grad_u_h,
+                  float* grad_u_z, float* grad_u_r, float* grad_u_h, 
+                  float* grad_w_z, float* grad_w_r, float* grad_w_h,
+                  float* grad_b_z, float* grad_b_r, float* grad_b_h,
+                  float* grad_r_t, float* grad_r_t_before_sigmoid,
+                  float* grad_z_t, float* grad_z_t_before_sigmoid,
+                  float* grad_h_hat, float* grad_h_hat_before_sigmoid,
+                  float* grad_h_t_1,
                   float *Z, float* R, float* H_hat, float* H_1) {
     
     // reset gradients for current timestep
@@ -227,23 +234,6 @@ void gru_backward(int i_start, int vec_len, int hidden_unit, int batch_size, flo
         h_hat[i] = H_hat[i];
         h_t_1[i] = H_1[i];
     }
-
-    float* grad_w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
-    float* grad_w_r = (float*)calloc(vec_len * hidden_unit, sizeof(float));
-    float* grad_w_h = (float*)calloc(vec_len * hidden_unit, sizeof(float));
-    float* grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-    float* grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-    float* grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
-    float* grad_b_z = (float*)calloc(hidden_unit, sizeof(float));
-    float* grad_b_r = (float*)calloc(hidden_unit, sizeof(float));
-    float* grad_b_h = (float*)calloc(hidden_unit, sizeof(float));   
-    float* grad_r_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_r_t_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_z_t_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float)); 
-    float* grad_h_hat = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_h_hat_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float));
-    float* grad_h_t_1 = (float*)calloc(batch_size * hidden_unit, sizeof(float));
 
     // for current timestep:
     // d loss / d z_t
@@ -382,6 +372,10 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
                         float* b_z, float* b_r, float* b_h,
                         float* dense, float* predict, float* arr_data, int m, int n, float* y, int iter) {
     
+    double forwardTime = 0;
+    double backwardTime = 0;
+    double inferenceTime = 0;
+    
     double startTime = CycleTimer::currentSeconds();
     for (int num_iter = 0; num_iter < iter; num_iter++) {
         printf("begin iter %d\n", num_iter);
@@ -405,6 +399,7 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
             float* Grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
             float* Grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
 
+            double forwardStartTime = CycleTimer::currentSeconds();
             // for each time step
             for (int j = 0; j < window_size; j++) {
 
@@ -424,14 +419,20 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
                 memcpy(h_t, h_t_new, batch_size * hidden_unit * sizeof(float));
                 memset(h_t_new, 0.f, batch_size * hidden_unit * sizeof(float));
             }
+            double forwardEndTime = CycleTimer::currentSeconds();
+            forwardTime += forwardEndTime - forwardStartTime;
 
+            double inferenceStartTime = CycleTimer::currentSeconds();
             // inference
             mat_multiplication(h_t, dense, predict, 1, batch_size, hidden_unit);
 
             // calculate loss
             float loss = calculate_loss(batch, &y[start_i], predict);
-            // cout << "loss is " << loss << endl;        
+            // cout << "loss is " << loss << endl;  
+            double inferenceEndTime = CycleTimer::currentSeconds();
+            inferenceTime += inferenceEndTime - inferenceStartTime;
 
+            double backwardStartTime = CycleTimer::currentSeconds();
             // reset gradients
             memset(grad_h_t, 0.f, batch_size * hidden_unit * sizeof(float));
             
@@ -441,6 +442,23 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
 
             // calculate gradient for each time_step
             for (int j = window_size-1; j >= 1; j--) {
+
+                float* grad_w_z = (float*)calloc(vec_len * hidden_unit, sizeof(float));
+                float* grad_w_r = (float*)calloc(vec_len * hidden_unit, sizeof(float));
+                float* grad_w_h = (float*)calloc(vec_len * hidden_unit, sizeof(float));
+                float* grad_u_z = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+                float* grad_u_r = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+                float* grad_u_h = (float*)calloc(hidden_unit * hidden_unit, sizeof(float));
+                float* grad_b_z = (float*)calloc(hidden_unit, sizeof(float));
+                float* grad_b_r = (float*)calloc(hidden_unit, sizeof(float));
+                float* grad_b_h = (float*)calloc(hidden_unit, sizeof(float));   
+                float* grad_r_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+                float* grad_r_t_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+                float* grad_z_t = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+                float* grad_z_t_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float)); 
+                float* grad_h_hat = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+                float* grad_h_hat_before_sigmoid = (float*)calloc(batch_size * hidden_unit, sizeof(float));
+                float* grad_h_t_1 = (float*)calloc(batch_size * hidden_unit, sizeof(float));
 
                 // Construct x_t
                 for (int _m = 0; _m < batch; _m++) {
@@ -462,6 +480,13 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
                             x_t, 
                             u_z, u_r, u_h, w_z, w_r, w_h, 
                             b_z, b_r, b_h, Grad_u_z, Grad_u_r, Grad_u_h,
+                            grad_u_z, grad_u_r, grad_u_h,
+                            grad_w_z, grad_w_r, grad_w_h,
+                            grad_b_z, grad_b_r, grad_b_h,
+                            grad_r_t, grad_r_t_before_sigmoid,
+                            grad_z_t, grad_z_t_before_sigmoid,
+                            grad_h_hat, grad_h_hat_before_sigmoid,
+                            grad_h_t_1,
                             &Z[j*hidden_unit*batch_size],
                             &R[j*hidden_unit*batch_size],
                             &H_hat[j*hidden_unit*batch_size],
@@ -472,6 +497,9 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
             update_variable(u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
             update_variable(u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
             update_variable(u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
+
+            double backwardEndTime = CycleTimer::currentSeconds();
+            backwardTime += backwardEndTime - backwardStartTime;
 
             free(Z);
             free(R);
@@ -486,9 +514,11 @@ void run_model(int num_data, int batch_size, int window_size, int vec_len, int h
         }
     }
 
-
     double endTime = CycleTimer::currentSeconds();
     printf("CPU Overall: %.3f ms\n", 1000.f * (endTime - startTime));
+    printf("CPU Forward: %.3f ms\n", 1000.f * (forwardTime));
+    printf("CPU Inference: %.3f ms\n", 1000.f * (inferenceTime));
+    printf("CPU Backward: %.3f ms\n", 1000.f * (backwardTime));
 }
 
 #endif // _GRU_SEQUANTIAL_H_

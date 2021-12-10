@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
     }
 
     // read input
-    fstream infile("data/data_sliding.csv");
+    fstream infile("../data/data_sliding.csv");
     string line, word;
     
     vector<vector<float> > data;
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
 
     vector<float> y;
 
-    fstream label("data/y.csv");
+    fstream label("../data/y.csv");
 
     while (label >> line) {
 
@@ -170,24 +170,38 @@ int main(int argc, char** argv) {
     if (use_gpu) {
         print_cuda_info();
         run_model_cuda(num_data, batch_size, window_size, vec_len, hidden_unit, step_size, 
-                            h_t, h_t_new, 
-                            w_z, w_r, w_h,
-                            u_z, u_r, u_h,
-                            b_z, b_r, b_h,
-                            dense, predict, arr_data, m , n, &y[0], iter);
-        return 0;
+                        h_t, h_t_new, 
+                        w_z, w_r, w_h,
+                        u_z, u_r, u_h,
+                        b_z, b_r, b_h,
+                        dense, predict, arr_data, m , n, &y[0], iter);
     } 
 
     // using CPU
     else {
         cout << "Using CPU..." << endl;
         run_model(num_data, batch_size, window_size, vec_len, hidden_unit, step_size,
-                        h_t, h_t_new,
-                        w_z, w_r, w_h,
-                        u_z, u_r, u_h,
-                        b_z, b_r, b_h,
-                        dense, predict, arr_data, m, n, &y[0], iter);
-        return 0;
+                    h_t, h_t_new,
+                    w_z, w_r, w_h,
+                    u_z, u_r, u_h,
+                    b_z, b_r, b_h,
+                    dense, predict, arr_data, m, n, &y[0], iter);
     }
+
+    free(h_t);
+    free(h_t_new);
+    free(w_z);
+    free(w_h);
+    free(w_r);
+    free(u_z);
+    free(u_r);
+    free(u_h);
+    free(b_z);
+    free(b_r);
+    free(b_h);
+    free(dense);
+    free(predict);
+
+    return 0;
 
 }

@@ -514,6 +514,9 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
     const int blocks_h = (hidden_unit * batch_size + threadsPerBlock - 1) / threadsPerBlock;
     const int blocks_predict = (batch_size + threadsPerBlock - 1) / threadsPerBlock;
     const int blocks_x = (x_width * batch_size + threadsPerBlock - 1) / threadsPerBlock;
+    int block_w = computeBlocks(x_width * hidden_unit);
+    int block_u = computeBlocks(hidden_unit * hidden_unit);
+    int block_b = computeBlocks(hidden_unit);
 
     double forwardTime = 0;
     double inferenceTime = 0;
@@ -572,6 +575,25 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
             
             // calculate gradient for each time_step
             for (int j = window_size-1; j >= 1; j--) {
+                
+                // reset gradients
+                mat_init_zeros_kernel<<<block_w, threadsPerBlock>>>(grad_w_z, x_width * hidden_unit);
+                mat_init_zeros_kernel<<<block_w, threadsPerBlock>>>(grad_w_h, x_width * hidden_unit);
+                mat_init_zeros_kernel<<<block_w, threadsPerBlock>>>(grad_w_r, x_width * hidden_unit);
+                mat_init_zeros_kernel<<<block_u, threadsPerBlock>>>(grad_u_z, hidden_unit * hidden_unit);
+                mat_init_zeros_kernel<<<block_u, threadsPerBlock>>>(grad_u_h, hidden_unit * hidden_unit);
+                mat_init_zeros_kernel<<<block_u, threadsPerBlock>>>(grad_u_r, hidden_unit * hidden_unit);
+                mat_init_zeros_kernel<<<block_b, threadsPerBlock>>>(grad_b_z, hidden_unit);
+                mat_init_zeros_kernel<<<block_b, threadsPerBlock>>>(grad_b_r, hidden_unit);
+                mat_init_zeros_kernel<<<block_b, threadsPerBlock>>>(grad_b_h, hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_z_t, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_z_t_before_sigmoid, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_r_t, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_r_t_before_sigmoid, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_h_hat, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_h_hat_before_sigmoid, batch_size * hidden_unit);
+                mat_init_zeros_kernel<<<blocks_h, threadsPerBlock>>>(grad_h_t_1, batch_size * hidden_unit);
+
                 // Construct x_t
                 copy_data_kernel<<<blocks_x, threadsPerBlock>>>(device_x_t, batch, x_width, device_data, m, n, start_i, j);
 
@@ -599,14 +621,15 @@ void run_model_cuda(int num_data, int batch_size, int window_size, int x_width, 
                                     &H_hat[j*hidden_unit*batch_size],
                                     &H_1[j*hidden_unit*batch_size]);
             }
-            double backwardTimeEnd = CycleTimer::currentSeconds();
-            backwardTime += backwardTimeEnd - backwardTimeStart;
 
-            // // update variables
+            // update variables
             int update_block = computeBlocks(hidden_unit * hidden_unit);
             update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_z, Grad_u_z, hidden_unit, hidden_unit, step_size);
             update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_r, Grad_u_r, hidden_unit, hidden_unit, step_size);
             update_variable_kernel<<<update_block, threadsPerBlock>>>(device_u_h, Grad_u_h, hidden_unit, hidden_unit, step_size);
+
+            double backwardTimeEnd = CycleTimer::currentSeconds();
+            backwardTime += backwardTimeEnd - backwardTimeStart;
 
         }
     }
