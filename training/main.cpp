@@ -42,6 +42,7 @@ float random_num() {
     return min + r * (max - min);
 }
 
+// initialize variables
 void init(float *weight, size_t size) {
 
     for (size_t i = 0; i < size; i++) {
@@ -49,6 +50,7 @@ void init(float *weight, size_t size) {
     }
 }
 
+// print out an array
 void Print(float *a, int width, int height) {
     for (int i = 0; i < width * height; i++) {
         printf("%.6f ", a[i]);
