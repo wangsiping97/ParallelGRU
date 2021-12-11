@@ -294,38 +294,30 @@ void gru_backward(int i_start, int vec_len, int hidden_unit, int batch_size, flo
     free(tmp4);
     tmp4 = mat_transpose(u_r, hidden_unit, hidden_unit);
     mat_multiplication(grad_r_t_before_sigmoid, tmp4, tmp, hidden_unit, batch_size, hidden_unit);
-    // if (i_start == 0) Print(grad_r_t_before_sigmoid, hidden_unit * batch_size);
 
     mat_add(grad_h_t_1, tmp, grad_h_t_1, hidden_unit, batch_size);
-    // if(i_start == 0) Print(grad_h_t_1, hidden_unit * batch_size);
 
     // d loss / d z_t_before_sigmoid
     mat_one_sub(grad_z_t, tmp, hidden_unit, batch_size);
     mat_hadamard(grad_z_t, tmp, grad_z_t_before_sigmoid, hidden_unit, batch_size);
-    //Print(grad_z_t_before_sigmoid, hidden_unit, batch_size);
 
     // d loss / d w_z
     mat_multiplication(tmp2, grad_z_t_before_sigmoid, grad_w_z, hidden_unit, vec_len, batch_size);
-    //Print(grad_w_z, hidden_unit, vec_len);
 
     // d loss / d u_z
     mat_multiplication(tmp3, grad_z_t_before_sigmoid, grad_u_z, hidden_unit, hidden_unit, batch_size);
-    //Print(grad_u_z, hidden_unit, hidden_unit);
 
     // d loss / d b_z
     sum_over_rows(grad_z_t_before_sigmoid, grad_b_z, hidden_unit, batch_size);
-    //Print(grad_b_z, hidden_unit, 1);
 
     // d loss / d h_t;
     free(tmp4);
     tmp4 = mat_transpose(u_z, hidden_unit, hidden_unit);
     mat_multiplication(grad_z_t_before_sigmoid, tmp4, tmp, hidden_unit, batch_size, hidden_unit);
     mat_add(grad_h_t_1, tmp, grad_h_t_1, hidden_unit, batch_size);
-    //Print(grad_h_t_1, hidden_unit, batch_size);
 
     // loss for next timestep
     memcpy(grad_h_t_1, grad_h_t, batch_size * hidden_unit * sizeof(float));
-    //Print(grad_h_t, batch_size, hidden_unit);
 
     // cumulate gradient for all timesteps;
 
