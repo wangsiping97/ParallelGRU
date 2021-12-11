@@ -18,7 +18,7 @@ $ make
 $ ./cudaGRU -g <1 for GPU or 0 for CPU> -i <number of iterations>
 ```
 
-### Infernce
+### Inference
 
 ```
 $ cd inference
