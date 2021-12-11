@@ -23,5 +23,5 @@ $ ./cudaGRU -g <1 for GPU or 0 for CPU> -i <number of iterations>
 ```
 $ cd inference
 $ make
-$ ./cudaGRU -g <1 for GPU or 0 for CPU>
+$ ./cudaInference -g <1 for GPU or 0 for CPU>
 ```
